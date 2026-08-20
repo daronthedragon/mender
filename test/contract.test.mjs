@@ -127,3 +127,49 @@ bad(
   const ok2 = validateSpec(spec({ auth: { headerEnv: { Authorization: "MY_TOKEN" } } }), "test");
   eq(ok2.auth.headerEnv.Authorization, "MY_TOKEN", "a valid auth block is kept");
 }
+
+/* ---- a spec directory is allowed to contain other json ---- */
+{
+  const { mkdtempSync, writeFileSync, copyFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { loadSpecs, looksLikeSpec } = await import("../dist/config.js");
+
+  ok(!looksLikeSpec({ lockfileVersion: 3, packages: {} }), "a lockfile is not a spec");
+  ok(!looksLikeSpec({ compilerOptions: {} }), "a tsconfig is not a spec");
+  ok(!looksLikeSpec(null), "null is not a spec");
+  ok(looksLikeSpec({ url: "https://x.com", fields: {} }), "url plus fields is a spec claim");
+
+  const dir = mkdtempSync(join(tmpdir(), "mender-dir-"));
+  copyFileSync("examples/scrapers/pricing.json", join(dir, "pricing.json"));
+  writeFileSync(join(dir, "package-lock.json"), JSON.stringify({ lockfileVersion: 3 }));
+  writeFileSync(join(dir, "tsconfig.json"), JSON.stringify({ compilerOptions: {} }));
+  writeFileSync(join(dir, "notes.json"), "{ this is not json");
+
+  const found = loadSpecs(dir);
+  eq(found.length, 1, "unrelated json beside the specs is skipped, not fatal");
+  eq(found[0].spec.name, "pricing", "and the real spec still loads");
+
+  // A file claiming to be a spec but malformed must still fail loudly.
+  writeFileSync(join(dir, "broken.json"), JSON.stringify({ url: "https://x.com", fields: { a: {} } }));
+  let threw = false;
+  try {
+    loadSpecs(dir);
+  } catch (e) {
+    threw = e instanceof ConfigError;
+  }
+  ok(threw, "a file that claims to be a spec and is malformed still raises");
+
+  rmSync(dir, { recursive: true, force: true });
+
+  const empty = mkdtempSync(join(tmpdir(), "mender-empty-"));
+  writeFileSync(join(empty, "package.json"), JSON.stringify({ name: "x" }));
+  let msg = "";
+  try {
+    loadSpecs(empty);
+  } catch (e) {
+    msg = e.message;
+  }
+  ok(msg.includes("mender init"), `an empty spec dir tells you what to do: ${msg}`);
+  rmSync(empty, { recursive: true, force: true });
+}

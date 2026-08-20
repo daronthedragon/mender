@@ -126,6 +126,19 @@ export function loadSpec(path: string): ScraperSpec {
   return spec;
 }
 
+/**
+ * Distinguishes "not a spec" from "a broken spec". A directory can legitimately
+ * hold package.json, tsconfig.json and a lockfile beside the specs, and failing
+ * the whole run on those — with a message about a missing "url" — is a bad
+ * first five minutes. A file carrying both `url` and `fields` is claiming to be
+ * a spec, so if it is malformed that is still reported loudly.
+ */
+export function looksLikeSpec(raw: unknown): boolean {
+  if (!raw || typeof raw !== "object") return false;
+  const o = raw as Record<string, unknown>;
+  return typeof o["url"] === "string" && Boolean(o["fields"]) && typeof o["fields"] === "object";
+}
+
 export function loadSpecs(dir: string): { path: string; spec: ScraperSpec }[] {
   let entries: string[];
   try {
@@ -133,13 +146,33 @@ export function loadSpecs(dir: string): { path: string; spec: ScraperSpec }[] {
   } catch {
     throw new ConfigError(`no scraper directory at ${dir}`);
   }
-  return entries
-    .filter((f) => f.endsWith(".json"))
-    .sort()
-    .map((f) => {
-      const path = join(dir, f);
-      return { path, spec: loadSpec(path) };
-    });
+
+  const out: { path: string; spec: ScraperSpec }[] = [];
+  const skipped: string[] = [];
+
+  for (const file of entries.filter((f) => f.endsWith(".json")).sort()) {
+    const path = join(dir, file);
+    let raw: unknown;
+    try {
+      raw = JSON.parse(readFileSync(path, "utf8"));
+    } catch {
+      skipped.push(file);
+      continue;
+    }
+    if (!looksLikeSpec(raw)) {
+      skipped.push(file);
+      continue;
+    }
+    out.push({ path, spec: loadSpec(path) });
+  }
+
+  if (out.length === 0) {
+    const aside = skipped.length > 0 ? ` (${skipped.length} json file(s) there are not specs)` : "";
+    throw new ConfigError(
+      `no scraper specs found in ${dir}${aside} — create one with: mender init <url>`,
+    );
+  }
+  return out;
 }
 
 /** Rewrite one selector in place, preserving key order and formatting. */
