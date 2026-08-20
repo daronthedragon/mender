@@ -676,7 +676,8 @@ to run) and **all fixtures stale** (no known-good reference survives).
 ## Continuous integration
 
 ```yaml
-- uses: daronthedragon/mender@main
+# published to the Marketplace as "Selector Sentinel"
+- uses: daronthedragon/mender@v1
   with:
     command: check
 ```
@@ -684,7 +685,7 @@ to run) and **all fixtures stale** (no known-good reference survives).
 The full loop — check, repair, open a PR with the verified diff:
 
 ```yaml
-- uses: daronthedragon/mender@main
+- uses: daronthedragon/mender@v1
   id: mender
   with: { command: repair, write: 'true' }
   continue-on-error: true

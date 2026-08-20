@@ -1,4 +1,4 @@
-name: Self-Healing Scrapers
+name: Selector Sentinel
 description: Check scrapers against their contracts, repair broken selectors when the repair can be proved, and open a pull request with the verified diff.
 author: daronthedragon
 branding:
