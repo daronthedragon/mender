@@ -1,4 +1,4 @@
-import { type ElementNode, normText } from "./html.js";
+import { type ElementNode, descendants, normText } from "./html.js";
 import { querySelector } from "./select.js";
 import type { Cause, FetchResult, ScraperSpec, Violation } from "./types.js";
 
@@ -94,10 +94,16 @@ export function classify(
     };
   }
 
-  if (normText(doc).length < 50) {
+  // Little text AND almost no structure. Text alone is not enough: a dense
+  // listing of prices and short labels is sparse in characters but is a real
+  // page, and calling it EMPTY would block repair on exactly the pages that
+  // need it most.
+  const text = normText(doc);
+  const elements = descendants(doc).length;
+  if (text.length < 50 && elements < 20) {
     return {
       cause: "EMPTY",
-      detail: `page carried ${normText(doc).length} chars of text (${fetched.html.length} bytes of html)`,
+      detail: `page carried ${text.length} chars of text across ${elements} elements (${fetched.html.length} bytes of html)`,
     };
   }
 

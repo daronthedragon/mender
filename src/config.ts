@@ -51,11 +51,60 @@ export function validateSpec(raw: unknown, source: string): ScraperSpec {
   }
   assert(Object.keys(fields).length > 0, `${source}: needs at least one field`);
 
+  if (o["auth"] !== undefined) {
+    assert(o["auth"] && typeof o["auth"] === "object", `${source}: "auth" must be an object`);
+    const a = o["auth"] as Record<string, unknown>;
+    if (a["headerEnv"] !== undefined) {
+      assert(a["headerEnv"] && typeof a["headerEnv"] === "object", `${source}: "auth.headerEnv" must be an object`);
+      for (const [header, varName] of Object.entries(a["headerEnv"] as Record<string, unknown>)) {
+        assert(
+          typeof varName === "string" && varName,
+          `${source}: auth.headerEnv["${header}"] must name an environment variable`,
+        );
+        assert(
+          !/\s/.test(varName) && varName === varName.trim(),
+          `${source}: auth.headerEnv["${header}"] should be a variable NAME, not a secret value`,
+        );
+      }
+    }
+    if (a["cookieEnv"] !== undefined) {
+      assert(typeof a["cookieEnv"] === "string" && a["cookieEnv"], `${source}: "auth.cookieEnv" must be a string`);
+    }
+    if (a["basicEnv"] !== undefined) {
+      const b = a["basicEnv"] as Record<string, unknown>;
+      assert(
+        typeof b?.["user"] === "string" && typeof b?.["pass"] === "string",
+        `${source}: "auth.basicEnv" needs "user" and "pass" environment variable names`,
+      );
+    }
+  }
+
+  if (o["paginate"] !== undefined) {
+    assert(o["paginate"] && typeof o["paginate"] === "object", `${source}: "paginate" must be an object`);
+    const p = o["paginate"] as Record<string, unknown>;
+    assert(
+      typeof p["maxPages"] === "number" && p["maxPages"] >= 1,
+      `${source}: "paginate.maxPages" is required and caps how far it will crawl`,
+    );
+    assert(
+      typeof p["next"] === "string" || typeof p["urlTemplate"] === "string",
+      `${source}: "paginate" needs either "next" (a link selector) or "urlTemplate"`,
+    );
+    if (typeof p["urlTemplate"] === "string") {
+      assert(
+        p["urlTemplate"].includes("{page}"),
+        `${source}: "paginate.urlTemplate" must contain {page}`,
+      );
+    }
+  }
+
   const spec: ScraperSpec = {
     name: o["name"] as string,
     url: o["url"] as string,
     fields,
   };
+  if (o["auth"]) spec.auth = o["auth"] as ScraperSpec["auth"];
+  if (o["paginate"]) spec.paginate = o["paginate"] as ScraperSpec["paginate"];
   if (typeof o["row"] === "string") spec.row = o["row"];
   if (o["expect"] && typeof o["expect"] === "object") {
     spec.expect = o["expect"] as ScraperSpec["expect"];

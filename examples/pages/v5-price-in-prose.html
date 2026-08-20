@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Pricing — Example Co</title></head>
+<body>
+<!--
+  The price is still here and still correct, but it now lives inside a sentence
+  rather than in its own element. The heuristics score candidates on text shape,
+  class overlap and DOM path; a price buried in prose matches none of those, so
+  they produce nothing. This is the case the model exists for.
+-->
+<header class="site-header"><nav><a href="/">Home</a></nav></header>
+<main class="page">
+  <h1>Plans that scale with you</h1>
+  <section class="pricing-grid">
+    <div class="pricing-card">
+      <h3 class="plan-title">Starter</h3>
+      <p class="blurb">Starts at $19 per month for small teams getting going.</p>
+      <ul class="features">
+        <li>1 project
+        <li>5 GB storage
+        <li>Email support
+      </ul>
+    </div>
+    <div class="pricing-card">
+      <h3 class="plan-title">Pro</h3>
+      <p class="blurb">Starts at $49 per month for growing teams that need more.</p>
+      <ul class="features">
+        <li>10 projects
+        <li>100 GB storage
+        <li>Priority support
+        <li>SSO
+      </ul>
+    </div>
+    <div class="pricing-card">
+      <h3 class="plan-title">Scale</h3>
+      <p class="blurb">Starts at $199 per month for organisations at scale.</p>
+      <ul class="features">
+        <li>Unlimited projects
+        <li>1 TB storage
+        <li>24/7 support
+      </ul>
+    </div>
+  </section>
+</main>
+</body>
+</html>

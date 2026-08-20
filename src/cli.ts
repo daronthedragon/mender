@@ -3,7 +3,11 @@ import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { ConfigError, loadSpec, loadSpecs, patchSpecFile } from "./config.js";
 import { runCheck, runRepair } from "./repair.js";
 import { prBody, prTitle, renderCheck, renderRepair } from "./report.js";
-import { saveFixture, todayStamp } from "./fixtures.js";
+import { listFixtures, loadFixtures, retire, retirementPlan, saveFixture, todayStamp } from "./fixtures.js";
+import { anthropicClient } from "./llm.js";
+import { extract } from "./extract.js";
+import { validate } from "./contract.js";
+import { pruneHistory } from "./history.js";
 import { dim, green, red, yellow } from "./color.js";
 
 const USAGE = `mender — scrapers that repair themselves
@@ -13,6 +17,7 @@ usage:
   mender extract <spec>            print the rows a spec currently produces, as JSON
   mender fixture <spec>            archive today's page as a golden snapshot (must pass first)
   mender repair  <spec>            diagnose, propose a fix, verify it, and show the diff
+  mender drift   [path]            report meaning-level drift against run history
 
 options:
   --scrapers <dir>   spec directory                       (default: scrapers)
@@ -22,6 +27,12 @@ options:
   --pr-body <file>   repair: write a pull-request body to this path
   --json             machine-readable output
   --force            fixture: archive even if the contract does not pass
+  --model            repair: ask a model when the heuristics come up empty
+                     (needs ANTHROPIC_API_KEY; proposals face the same gates)
+  --record           check/drift: append this run to the history file
+  --prune            fixture: retire snapshots that have stopped being useful
+  --max-age-days <n> fixture --prune: retire failing snapshots older than this (default 180)
+  --keep <n>         fixture --prune: keep at most this many snapshots (default 10)
 `;
 
 interface Args {
@@ -56,6 +67,13 @@ function str(flags: Args["flags"], key: string, fallback: string): string {
   return typeof v === "string" ? v : fallback;
 }
 
+function num(flags: Args["flags"], key: string): number | null {
+  const v = flags[key];
+  if (typeof v !== "string") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 function htmlFrom(flags: Args["flags"]): { html?: string } {
   const path = flags["html"];
   if (typeof path !== "string") return {};
@@ -75,6 +93,15 @@ async function main(): Promise<number> {
   const scrapersDir = str(args.flags, "scrapers", "scrapers");
   const fixturesDir = str(args.flags, "fixtures", "fixtures");
   const asJson = args.flags["json"] === true;
+  const historyRoot = str(args.flags, "history", fixturesDir);
+  const wantModel = args.flags["model"] === true;
+
+  const model = wantModel ? anthropicClient() : null;
+  if (wantModel && !model) {
+    process.stderr.write(
+      yellow("--model requested but ANTHROPIC_API_KEY is not set; continuing with heuristics only\n"),
+    );
+  }
 
   if (!args.command || args.command === "help" || args.flags["help"]) {
     process.stdout.write(USAGE);
@@ -86,7 +113,13 @@ async function main(): Promise<number> {
       const specs = specsFrom(args, scrapersDir);
       const results = [];
       for (const { spec } of specs) {
-        results.push(await runCheck(spec, htmlFrom(args.flags)));
+        results.push(
+          await runCheck(spec, {
+            ...htmlFrom(args.flags),
+            historyRoot,
+            record: args.flags["record"] === true,
+          }),
+        );
       }
       if (asJson) {
         process.stdout.write(
@@ -96,7 +129,9 @@ async function main(): Promise<number> {
               cause: r.cause,
               detail: r.causeDetail,
               rows: r.rows.length,
+              pages: r.pages.length,
               violations: r.violations,
+              drift: r.drift,
             })),
             null,
             2,
@@ -124,8 +159,85 @@ async function main(): Promise<number> {
       return result.violations.length === 0 ? 0 : 1;
     }
 
+    case "drift": {
+      const specs = specsFrom(args, scrapersDir);
+      let found = 0;
+      for (const { spec } of specs) {
+        const result = await runCheck(spec, {
+          ...htmlFrom(args.flags),
+          historyRoot,
+          record: args.flags["record"] === true,
+          ...(num(args.flags, "median-shift") !== null || num(args.flags, "row-shift") !== null
+            ? {
+                drift: {
+                  ...(num(args.flags, "median-shift") !== null
+                    ? { medianShift: num(args.flags, "median-shift")! }
+                    : {}),
+                  ...(num(args.flags, "row-shift") !== null
+                    ? { rowShift: num(args.flags, "row-shift")! }
+                    : {}),
+                },
+              }
+            : {}),
+        });
+        found += result.drift.length;
+        if (asJson) {
+          process.stdout.write(JSON.stringify({ name: spec.name, drift: result.drift }, null, 2) + "\n");
+          continue;
+        }
+        if (result.cause !== "OK") {
+          process.stdout.write(
+            yellow(`${spec.name}: ${result.cause} — drift is only judged on a structurally sound run\n`),
+          );
+          continue;
+        }
+        if (result.drift.length === 0) {
+          process.stdout.write(green(`${spec.name}: no drift against history\n`));
+          continue;
+        }
+        process.stdout.write(yellow(`${spec.name}: ${result.drift.length} drift finding(s)\n`));
+        for (const d of result.drift) {
+          const where = d.field === "__rows__" ? "rows" : d.field;
+          process.stdout.write(`  ~ ${where}: ${d.detail} ${dim(`(${d.code})`)}\n`);
+        }
+      }
+      // Drift is a warning for a human, never a trigger for a selector repair.
+      return found > 0 ? 1 : 0;
+    }
+
     case "fixture": {
       const specs = specsFrom(args, scrapersDir);
+
+      if (args.flags["prune"] === true) {
+        let removed = 0;
+        for (const { spec } of specs) {
+          const loaded = loadFixtures(fixturesDir, spec.name);
+          const passing = new Set(
+            loaded.filter((f) => validate(extract(f.doc, spec), spec).length === 0).map((f) => f.source),
+          );
+          const plan = retirementPlan(
+            listFixtures(fixturesDir, spec.name),
+            (source) => passing.has(source),
+            {
+              maxAgeDays: num(args.flags, "max-age-days") ?? 180,
+              keep: num(args.flags, "keep") ?? 10,
+            },
+          );
+          for (const r of plan) {
+            process.stdout.write(yellow(`${spec.name}: retiring ${r.source} — ${r.reason}\n`));
+          }
+          removed += retire(plan);
+          const droppedRuns = pruneHistory(historyRoot, spec.name, num(args.flags, "keep-history") ?? 200);
+          if (droppedRuns > 0) {
+            process.stdout.write(dim(`${spec.name}: trimmed ${droppedRuns} old history record(s)\n`));
+          }
+          if (plan.length === 0) {
+            process.stdout.write(green(`${spec.name}: nothing to retire\n`));
+          }
+        }
+        return removed > 0 ? 0 : 1;
+      }
+
       let saved = 0;
       for (const { spec } of specs) {
         const opts = htmlFrom(args.flags);
@@ -148,7 +260,12 @@ async function main(): Promise<number> {
       const specs = specsFrom(args, scrapersDir);
       let anyFixed = false;
       for (const { path, spec } of specs) {
-        const outcome = await runRepair(spec, { fixturesRoot: fixturesDir, ...htmlFrom(args.flags) });
+        const outcome = await runRepair(spec, {
+          fixturesRoot: fixturesDir,
+          historyRoot,
+          model,
+          ...htmlFrom(args.flags),
+        });
         if (asJson) {
           process.stdout.write(
             JSON.stringify(
@@ -160,10 +277,13 @@ async function main(): Promise<number> {
                 fixes: outcome.fixes.map((f) => ({
                   target: f.target,
                   selector: f.selector,
+                  via: f.via ?? "heuristic",
                   passes: f.passes,
                 })),
                 unresolved: outcome.unresolved,
                 rejected: outcome.rejectedCount,
+                rejections: outcome.rejections,
+                modelUsed: outcome.modelUsed,
               },
               null,
               2,

@@ -5,20 +5,22 @@ Scrapers don't crash when they break. They return `[]`, or `null`, or yesterday'
 `mender` watches for that, works out **why** it happened, and only then proposes a selector fix — which it has to prove against every page that used to work before you'll ever see it.
 
 ```
-run ─→ contract check ─→ pass ─→ done
+run ─→ contract check ─→ pass ─→ drift check ─→ done
               │
               └─ fail ─→ WHY? ─┬─ bot-check page  ─→ back off, selectors untouched
                                ├─ 404 / redirect  ─→ different bug, not a selector
+                               ├─ missing credential ─→ config error, not a selector
                                ├─ empty response  ─→ transport, not a selector
                                └─ page fine, data wrong
                                         ↓
-                                  propose selectors
-                                        ↓
-                                   3 gates ─── fail ─→ report the near-misses, change nothing
-                                        │
-                                       pass
-                                        ↓
-                                   open a PR
+                              heuristics propose ─→ (empty?) ─→ model proposes
+                                        ↓                            ↓
+                                        └──────── 3 gates ───────────┘
+                                                   │
+                                          fail ────┴──── pass
+                                            ↓             ↓
+                                  report near-misses,  open a PR
+                                  change nothing
 ```
 
 Zero runtime dependencies. Own HTML parser, own CSS selector engine, plain `fetch`.
@@ -68,8 +70,7 @@ pricing  LAYOUT_CHANGE  page served normally but 3 contract violations
 
 ```
 $ mender repair scrapers/pricing.json
-pricing  LAYOUT_CHANGE  page served normally but 3 contract violations
-  fixed price
+  fixed price via heuristic
     - ".amount"
     + ".amount, [data-testid=\"price-value\"]"
       ok live         3 rows pass for price
@@ -87,7 +88,7 @@ Unions solve it. The old branch keeps matching the pages that used to work; the 
 
 ## The three gates
 
-A proposal has to clear all three before you see it.
+A proposal has to clear all three before you see it — whoever proposed it.
 
 | Gate | Question | What it catches |
 | --- | --- | --- |
@@ -120,11 +121,112 @@ pricing  BLOCKED  challenge element #challenge-form
 
 Exactly one cause — `LAYOUT_CHANGE` — is allowed to trigger a repair. `BLOCKED`, `HTTP_ERROR`, `REDIRECTED` and `EMPTY` never are, and a transport failure is marked status `0` so it can never be mistaken for a page.
 
-## Why the agent is not in the hot path
+## The model is not in the hot path
 
 The obvious design points a model at the page on every run. That is slow, costs money per request, and returns slightly different answers each time — unusable at scale.
 
-Here the hot path stays plain deterministic CSS: fast, free, reproducible. The expensive reasoning only wakes up when something breaks, which for a healthy scraper is a handful of times a year. v0.1's proposer is pure heuristics — DOM signatures, text shapes, path similarity — so **it needs no API key at all**. An LLM proposer is the next cut, and it inherits the same three gates.
+Here the hot path stays plain deterministic CSS: fast, free, reproducible. Heuristics — DOM signatures, text shapes, path similarity — handle breakage first and need no API key at all. **The model is only consulted when the heuristics come up empty**, which for a healthy scraper is a handful of times a year.
+
+```bash
+export ANTHROPIC_API_KEY=sk-...
+mender repair scrapers/pricing.json --model
+```
+
+The model earns nothing by being a model. Its proposals face the identical three gates:
+
+```
+  fixed price via claude-sonnet-5
+    - ".amount"
+    + ".amount, .blurb"
+      ok live         3 rows pass for price
+      ok 2026-07-02   3 rows unchanged
+      ok continuity   values still read as currency
+```
+
+And when it is wrong, it is refused exactly like a heuristic:
+
+```
+  unfixed price no candidate passed every gate
+    tried [class="rating-value"]  (claude-sonnet-5)  rejected at continuity  values now read as numeric, archived pages had currency
+```
+
+Four properties the tests pin down:
+
+- A page the heuristics already solved **never reaches the model** — no token is spent on a solved problem.
+- A `BLOCKED` page never reaches the model either, because the cause classifier stops before any proposer runs.
+- A proposal the heuristics already tried is not verified twice.
+- A model outage, malformed JSON, or an unparseable selector degrades to *no repair*, never to a wrong one.
+
+The model is told that returning an empty list is a valid answer, and an empty list is honoured rather than second-guessed.
+
+## Semantic drift: the failure the contract cannot see
+
+If a price starts including tax, every selector still matches, every type still parses, all three gates pass — and the number is wrong. Structure is checked per run; **meaning can only be checked against the past**.
+
+```bash
+mender check scrapers/pricing.json --record   # build a baseline
+mender drift scrapers/pricing.json            # compare against it
+```
+
+```
+pricing: 1 drift finding(s)
+  ~ price: median 58.8 is 20% up from a baseline of 49 (MAGNITUDE_SHIFT)
+```
+
+That run had **zero contract violations**. Four signals are tracked against run history:
+
+| Signal | Catches |
+| --- | --- |
+| `MAGNITUDE_SHIFT` | Tax added, currency switched, units changed. Default threshold 15%. |
+| `KIND_SHIFT` | `$19` becoming `19`, a price becoming a phrase. |
+| `ROW_COUNT_SHIFT` | Silent pagination changes, a filter applied server-side. Default 50%. |
+| `NULL_RATE_SHIFT` | A field quietly emptying out for most rows. |
+
+Drift is **a warning for a human, never a trigger for a repair**. Rewriting a selector because a price started including tax would be exactly the wrong move, and there is a test asserting it does not happen.
+
+Drift is judged only on a structurally sound run — a broken selector would otherwise report itself as a dramatic change in meaning.
+
+## Pagination
+
+```json
+"paginate": { "next": "a.next-page", "maxPages": 10 }
+```
+
+Follows next links, resolving relative hrefs, accumulating rows across pages. Or address pages directly:
+
+```json
+"paginate": { "urlTemplate": "https://example.com/list?page={page}", "maxPages": 10 }
+```
+
+`maxPages` is required — an uncapped crawler is a bug, not a feature. It also stops at a repeated URL, so a page linking to itself cannot spin forever, and at the first non-200.
+
+## Auth
+
+Specs name environment variables. **They never hold secrets**, so a spec file stays safe to commit — config validation rejects a value that looks like a literal token rather than a variable name.
+
+```json
+"auth": {
+  "headerEnv": { "Authorization": "MY_API_TOKEN" },
+  "cookieEnv": "MY_SESSION_COOKIE",
+  "basicEnv": { "user": "SITE_USER", "pass": "SITE_PASS" }
+}
+```
+
+Credentials are sent on every paginated page, not just the first. A missing variable is reported as `HTTP_ERROR` naming the variable — never as a layout change, because rewriting selectors against a login page is precisely the failure this tool exists to prevent.
+
+## Fixture aging
+
+Snapshots rot. One from eighteen months ago will eventually fail the current spec for legitimate reasons, and once it does it blocks every future repair.
+
+```bash
+mender fixture scrapers/pricing.json --prune
+```
+
+```
+pricing: retiring 2024-01-01 — fails the current spec and is 962 days old
+```
+
+The policy retires snapshots that have stopped being a useful reference, and **never the last passing one** — a repair with no reference is what the regression gate exists to prevent. A *recent* failing snapshot is kept, since it may just be a fresh break you haven't fixed yet.
 
 ## Install
 
@@ -143,16 +245,22 @@ mender check   [path]   run every scraper (or one spec) against its contract
 mender extract <spec>   print the rows a spec currently produces, as JSON
 mender fixture <spec>   archive today's page as a golden snapshot
 mender repair  <spec>   diagnose, propose, verify, show the diff
+mender drift   [path]   report meaning-level drift against run history
 
---scrapers <dir>   spec directory                  (default: scrapers)
---fixtures <dir>   snapshot directory              (default: fixtures)
---html <file>      use a local file instead of fetching
---write            apply the verified fix to the spec
---pr-body <file>   write a pull-request body
---json             machine-readable output
+--scrapers <dir>     spec directory                (default: scrapers)
+--fixtures <dir>     snapshot directory            (default: fixtures)
+--html <file>        use a local file instead of fetching
+--write              apply the verified fix to the spec
+--pr-body <file>     write a pull-request body
+--model              ask a model when the heuristics come up empty
+--record             append this run to the history file
+--prune              fixture: retire snapshots that stopped being useful
+--max-age-days <n>   fixture --prune: age limit for failing snapshots (default 180)
+--keep <n>           fixture --prune: how many snapshots to keep (default 10)
+--json               machine-readable output
 ```
 
-`check` exits non-zero when anything is failing, so cron and CI need no wrapper.
+`check` and `drift` exit non-zero when anything is wrong, so cron and CI need no wrapper.
 
 ## Try it without a network
 
@@ -160,48 +268,57 @@ Every scenario below is a real file in `examples/pages/`.
 
 ```bash
 node dist/cli.js repair examples/scrapers/pricing.json --fixtures examples/fixtures \
-  --html examples/pages/v2-price-moved.html      # a field moved   → repaired
+  --html examples/pages/v2-price-moved.html      # a field moved    → repaired
 ```
 
 ```bash
 node dist/cli.js repair examples/scrapers/pricing.json --fixtures examples/fixtures \
-  --html examples/pages/v3-rows-renamed.html     # rows renamed    → repaired
+  --html examples/pages/v3-rows-renamed.html     # rows renamed     → repaired
 ```
 
 ```bash
 node dist/cli.js repair examples/scrapers/pricing.json --fixtures examples/fixtures \
-  --html examples/pages/v4-price-gone-trap.html  # plausible trap  → refused
+  --html examples/pages/v4-price-gone-trap.html  # plausible trap   → refused
 ```
 
 ```bash
 node dist/cli.js repair examples/scrapers/pricing.json --fixtures examples/fixtures \
-  --html examples/pages/blocked.html             # challenge page  → untouched
+  --html examples/pages/blocked.html             # challenge page   → untouched
 ```
 
-## What v0.1 does not do
+```bash
+node dist/cli.js repair examples/scrapers/pricing.json --fixtures examples/fixtures \
+  --html examples/pages/v5-price-in-prose.html   # heuristics blind → needs --model
+```
+
+## What it still does not do
 
 Named honestly, because a self-healing tool that overstates itself is the worst kind.
 
-- **No browser.** Plain `fetch` only, so client-rendered pages are out. Server-rendered pages are the majority of scraping targets and staying browserless keeps this installable in seconds.
-- **No LLM proposer yet.** Heuristics only. They handle renamed classes, moved elements and new wrapper markup; they will not reason about a page that was genuinely redesigned.
-- **No semantic drift detection.** If a price starts including tax, every gate passes and the number is wrong. Catching that needs distribution monitoring on values over time — the harder and more valuable half.
-- **No pagination, auth, or fixture aging.** Old snapshots will eventually fail legitimately and need a retirement policy.
+- **No browser.** Plain `fetch` only, so client-rendered pages are out. Adding one means a real runtime dependency, which is the one property this project hasn't spent yet.
+- **Continuity can false-reject a legitimate reformat.** If a price changes from `$19` to `19 dollars` the kind changes and a correct repair is refused. Refusing costs you a manual fix; accepting a wrong one costs you a database of bad data, so the gate errs the expensive-but-safe way.
+- **Drift needs history.** Three prior runs minimum, so a brand-new scraper is blind until it has a baseline.
+- **`--write` on a multi-target repair is all-or-nothing.** No way to accept the row fix and reject the field fix from the CLI.
 
 ## Tests
 
-165 assertions, no network required except a local server the suite starts itself.
+286 assertions. No network required beyond a local server the suite starts itself, and no API key — the model path is tested through an injected fake client.
 
 ```
 $ npm test
   cause classification (the safety gate)
   contracts and config
+  semantic drift
+  fixture retirement
   extraction
   real http path
   html parser
+  llm proposer
+  pagination and auth
   repair, end to end
   selector engine
 
-  165 passed, 0 failed
+  286 passed, 0 failed
 ```
 
 MIT.

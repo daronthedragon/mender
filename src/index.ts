@@ -10,5 +10,7 @@ export * from "./fixtures.js";
 export * from "./propose.js";
 export * from "./signature.js";
 export * from "./verify.js";
+export * from "./llm.js";
+export * from "./history.js";
 export * from "./repair.js";
 export * from "./report.js";

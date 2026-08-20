@@ -1,40 +1,103 @@
 import { type ElementNode, parse } from "./html.js";
 import { classify, shouldRepair } from "./classify.js";
 import { brokenFields, rowCountBroken, validate } from "./contract.js";
-import { extract, toRows } from "./extract.js";
-import { fetchPage } from "./fetch.js";
+import { type ExtractedRow, extract, toRows } from "./extract.js";
+import { AuthError, fetchPages } from "./fetch.js";
 import { type LoadedFixture, loadFixtures } from "./fixtures.js";
+import { type DriftFinding, type DriftOptions, appendRun, detectDrift, loadHistory, summarise } from "./history.js";
+import { type ModelClient, proposeWithModel } from "./llm.js";
 import { ROW_TARGET, propose } from "./propose.js";
 import { applyCandidate, firstVerified } from "./verify.js";
-import type { CheckResult, ScraperSpec, VerifiedCandidate } from "./types.js";
+import type { Candidate, CheckResult, FetchResult, ScraperSpec, VerifiedCandidate } from "./types.js";
 
 export interface RunOptions {
   /** Use this HTML instead of fetching. Keeps runs offline and reproducible. */
   html?: string;
   timeoutMs?: number;
+  /** Where run history lives, enabling drift detection. */
+  historyRoot?: string;
+  /** Append this run to the history file. */
+  record?: boolean;
+  drift?: DriftOptions;
+  now?: Date;
+}
+
+function reindex(rows: ExtractedRow[]): ExtractedRow[] {
+  return rows.map((r, index) => ({ ...r, index }));
 }
 
 export async function runCheck(spec: ScraperSpec, opts: RunOptions = {}): Promise<CheckResult> {
-  const fetched =
-    opts.html !== undefined
-      ? { status: 200, finalUrl: spec.url, html: opts.html, ms: 0 }
-      : await fetchPage(spec.url, { timeoutMs: opts.timeoutMs });
+  let pages: FetchResult[];
+  let primary: FetchResult;
 
-  const doc = parse(fetched.html);
-  const extracted = extract(doc, spec);
+  if (opts.html !== undefined) {
+    primary = { status: 200, finalUrl: spec.url, html: opts.html, ms: 0 };
+    pages = [primary];
+  } else {
+    try {
+      const fetched = await fetchPages(spec, { ...(opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}) });
+      primary = fetched.primary;
+      pages = fetched.pages;
+    } catch (e) {
+      // A misconfigured credential must be loud and must never look like a
+      // layout change, so it is reported as an error cause rather than thrown.
+      const detail = e instanceof AuthError ? e.message : `fetch failed: ${(e as Error).message}`;
+      primary = { status: 0, finalUrl: spec.url, html: `<!-- ${detail} -->`, ms: 0 };
+      return {
+        spec,
+        fetched: primary,
+        pages: [primary],
+        rows: [],
+        violations: [],
+        cause: "HTTP_ERROR",
+        causeDetail: detail,
+        drift: [],
+      };
+    }
+  }
+
+  const primaryDoc = parse(primary.html);
+  const extracted = reindex(
+    pages.flatMap((p) => extract(p === primary ? primaryDoc : parse(p.html), spec)),
+  );
   const violations = validate(extracted, spec);
-  const { cause, detail } = classify(fetched, doc, spec, violations);
+  const { cause, detail } = classify(primary, primaryDoc, spec, violations);
 
-  return { spec, fetched, rows: toRows(extracted), violations, cause, causeDetail: detail };
+  let drift: DriftFinding[] = [];
+  if (opts.historyRoot) {
+    const ts = (opts.now ?? new Date()).toISOString();
+    const record = summarise(extracted, spec, ts);
+    const history = loadHistory(opts.historyRoot, spec.name);
+    // Drift is only meaningful when the structure is sound; a broken selector
+    // would otherwise report itself as a dramatic change in meaning.
+    if (cause === "OK") {
+      drift = detectDrift(history, record, opts.drift ?? {});
+      if (opts.record) appendRun(opts.historyRoot, spec.name, record);
+    }
+  }
+
+  return {
+    spec,
+    fetched: primary,
+    pages,
+    rows: toRows(extracted),
+    violations,
+    cause,
+    causeDetail: detail,
+    drift,
+  };
 }
 
 export interface RepairOptions extends RunOptions {
   fixturesRoot: string;
+  /** When the heuristics come up empty, ask a model. Optional by design. */
+  model?: ModelClient | null;
 }
 
 export interface Rejection {
   target: string;
   selector: string;
+  via: string;
   failedGate: string;
   detail: string;
 }
@@ -50,13 +113,12 @@ export interface RepairOutcome {
   rejections: Rejection[];
   /** Fixtures excluded because they no longer pass the current spec. */
   staleFixtures: string[];
+  /** Whether a model was consulted at all. */
+  modelUsed: string | null;
   patched: ScraperSpec | null;
 }
 
-export async function runRepair(
-  spec: ScraperSpec,
-  opts: RepairOptions,
-): Promise<RepairOutcome> {
+export async function runRepair(spec: ScraperSpec, opts: RepairOptions): Promise<RepairOutcome> {
   const check = await runCheck(spec, opts);
   const base: RepairOutcome = {
     check,
@@ -67,6 +129,7 @@ export async function runRepair(
     rejectedCount: 0,
     rejections: [],
     staleFixtures: [],
+    modelUsed: null,
     patched: null,
   };
 
@@ -95,8 +158,8 @@ export async function runRepair(
       staleFixtures: stale,
       skippedReason:
         all.length === 0
-          ? "no fixtures to learn from — run `mender fixture add` while the scraper still works"
-          : `all ${all.length} fixtures already fail the current spec, so there is no known-good reference`,
+          ? "no fixtures to learn from — run `mender fixture` while the scraper still works"
+          : `all ${all.length} fixtures already fail the current spec, so there is no known-good reference. Retire them with \`mender fixture --prune\` once you have a fresh one.`,
     };
   }
 
@@ -109,54 +172,80 @@ export async function runRepair(
   const unresolved: string[] = [];
   const rejections: Rejection[] = [];
   let rejectedCount = 0;
+  let modelUsed: string | null = null;
 
+  // Cap per proposer, not globally: otherwise a long list of heuristic misses
+  // hides the model's, which is the one a human most wants to see.
+  const PER_PROPOSER = 3;
   const recordMisses = (target: string, tried: VerifiedCandidate[]) => {
-    for (const t of tried.slice(0, 3)) {
+    const counts = new Map<string, number>();
+    for (const t of tried) {
+      const via = t.via ?? "heuristic";
+      const seen = counts.get(via) ?? 0;
+      if (seen >= PER_PROPOSER) continue;
       const gate = t.passes.find((pass) => !pass.ok);
-      if (gate) {
-        rejections.push({
-          target,
-          selector: t.proposed,
-          failedGate: gate.source,
-          detail: gate.detail,
-        });
-      }
+      if (!gate) continue;
+      counts.set(via, seen + 1);
+      rejections.push({
+        target,
+        selector: t.proposed,
+        via,
+        failedGate: gate.source,
+        detail: gate.detail,
+      });
     }
   };
 
-  // The row selector has to be right before any field selector can be judged.
-  if (rowCountBroken(check.violations) && spec.row) {
-    const candidates = propose({ spec: working, liveDoc, goldenDocs: goldens, target: ROW_TARGET });
-    const { accepted, tried } = firstVerified(working, candidates, live, goldens);
+  /**
+   * Heuristics first — they are free, deterministic, and handle the common
+   * cases. The model is a fallback for the ones they cannot see, and it earns
+   * nothing by being a model: its proposals face the identical three gates.
+   */
+  const attempt = async (target: string): Promise<VerifiedCandidate | null> => {
+    const proposalInput = {
+      spec: working,
+      liveDoc,
+      goldenDocs: goldens,
+      target,
+      ...(target !== ROW_TARGET && working.row ? { liveRowSelector: working.row } : {}),
+    };
+
+    const heuristic: Candidate[] = propose(proposalInput).map((c) => ({ ...c, via: "heuristic" }));
+    const first = firstVerified(working, heuristic, live, goldens);
+    let tried = first.tried;
+    let accepted = first.accepted;
+
+    if (!accepted && opts.model) {
+      modelUsed = opts.model.name;
+      const already = new Set(heuristic.map((c) => c.selector));
+      const fromModel = (await proposeWithModel(opts.model, proposalInput))
+        .filter((c) => !already.has(c.selector))
+        .map((c) => ({ ...c, via: opts.model!.name }));
+      const second = firstVerified(working, fromModel, live, goldens);
+      tried = [...tried, ...second.tried];
+      accepted = second.accepted;
+    }
+
     rejectedCount += tried.length - (accepted ? 1 : 0);
     if (accepted) {
       fixes.push(accepted);
       working = applyCandidate(working, accepted);
-    } else {
-      unresolved.push(ROW_TARGET);
-      recordMisses(ROW_TARGET, tried);
+      return accepted;
     }
+    unresolved.push(target);
+    recordMisses(target, tried);
+    return null;
+  };
+
+  // The row selector has to be right before any field selector can be judged.
+  if (rowCountBroken(check.violations) && spec.row) {
+    await attempt(ROW_TARGET);
   }
 
   // Re-derive which fields are broken under the (possibly repaired) row selector.
   const afterRow = validate(extract(liveDoc, working), working);
   for (const field of brokenFields(afterRow)) {
-    const candidates = propose({
-      spec: working,
-      liveDoc,
-      goldenDocs: goldens,
-      target: field,
-      ...(working.row ? { liveRowSelector: working.row } : {}),
-    });
-    const { accepted, tried } = firstVerified(working, candidates, live, goldens);
-    rejectedCount += tried.length - (accepted ? 1 : 0);
-    if (accepted) {
-      fixes.push(accepted);
-      working = applyCandidate(working, accepted);
-    } else {
-      unresolved.push(field);
-      recordMisses(field, tried);
-    }
+    await attempt(field);
   }
 
   return {
@@ -168,6 +257,7 @@ export async function runRepair(
     rejectedCount,
     rejections,
     staleFixtures: stale,
+    modelUsed,
     patched: fixes.length > 0 ? working : null,
   };
 }

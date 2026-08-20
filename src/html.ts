@@ -253,3 +253,56 @@ export function classList(el: ElementNode): string[] {
   const c = el.attrs["class"];
   return c ? c.split(/\s+/).filter(Boolean) : [];
 }
+
+const NEEDS_ESCAPE = /[&<>"]/g;
+const ESCAPES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" };
+
+function escapeHtml(s: string): string {
+  return s.replace(NEEDS_ESCAPE, (c) => ESCAPES[c]!);
+}
+
+export interface SerializeOptions {
+  /** Stop descending past this depth, replacing deeper content with a marker. */
+  maxDepth?: number;
+  /** Truncate any single text node longer than this. */
+  maxText?: number;
+  /** Drop these attributes entirely (inline styles and event handlers are noise). */
+  dropAttrs?: (name: string) => boolean;
+}
+
+const DEFAULT_DROP = (name: string) =>
+  name === "style" || name.startsWith("on") || name === "srcset" || name === "sizes";
+
+/**
+ * Render an element back to HTML. Used to show a model the markup around a
+ * value without shipping it a megabyte of minified page.
+ */
+export function serialize(node: DomNode, opts: SerializeOptions = {}, depth = 0): string {
+  const maxDepth = opts.maxDepth ?? 6;
+  const maxText = opts.maxText ?? 200;
+  const drop = opts.dropAttrs ?? DEFAULT_DROP;
+
+  if (node.type === "text") {
+    const t = node.text.replace(/\s+/g, " ");
+    if (!t.trim()) return "";
+    return escapeHtml(t.length > maxText ? t.slice(0, maxText) + "…" : t);
+  }
+  if (node.tag === "#document") {
+    return node.children.map((c) => serialize(c, opts, depth)).join("");
+  }
+  if (RAWTEXT.has(node.tag)) return "";
+
+  const attrs = Object.entries(node.attrs)
+    .filter(([k]) => !drop(k))
+    .map(([k, v]) => (v === "" ? ` ${k}` : ` ${k}="${escapeHtml(v)}"`))
+    .join("");
+
+  if (VOID.has(node.tag)) return `<${node.tag}${attrs}>`;
+  if (depth >= maxDepth) {
+    const inner = normText(node);
+    return `<${node.tag}${attrs}>${escapeHtml(inner.slice(0, maxText))}</${node.tag}>`;
+  }
+
+  const inner = node.children.map((c) => serialize(c, opts, depth + 1)).join("");
+  return `<${node.tag}${attrs}>${inner}</${node.tag}>`;
+}

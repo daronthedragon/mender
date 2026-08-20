@@ -108,3 +108,22 @@ bad(
   );
   eq(spec.fields.p.required, true, "fields are required unless told otherwise");
 }
+
+/* ---- auth and pagination config ---- */
+const spec = (extra) => ({ name: "a", url: "https://x.com", fields: { p: { selector: ".x", type: "string" } }, ...extra });
+
+bad(spec({ paginate: { next: "a.next" } }), "pagination without maxPages is rejected");
+bad(spec({ paginate: { maxPages: 3 } }), "pagination with neither next nor urlTemplate is rejected");
+bad(spec({ paginate: { maxPages: 3, urlTemplate: "https://x.com/list" } }), "a urlTemplate without {page} is rejected");
+bad(spec({ auth: { basicEnv: { user: "U" } } }), "basic auth without both variable names is rejected");
+bad(
+  spec({ auth: { headerEnv: { Authorization: "Bearer sk-live-abc123" } } }),
+  "a literal secret in headerEnv is rejected — the field names a variable",
+);
+
+{
+  const ok1 = validateSpec(spec({ paginate: { maxPages: 3, next: "a.next" } }), "test");
+  eq(ok1.paginate.maxPages, 3, "a valid paginate block is kept");
+  const ok2 = validateSpec(spec({ auth: { headerEnv: { Authorization: "MY_TOKEN" } } }), "test");
+  eq(ok2.auth.headerEnv.Authorization, "MY_TOKEN", "a valid auth block is kept");
+}

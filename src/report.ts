@@ -56,7 +56,7 @@ export function renderRepair(outcome: RepairOutcome, specPath: string): string {
       fix.target === ROW_TARGET
         ? outcome.check.spec.row
         : outcome.check.spec.fields[fix.target]?.selector;
-    lines.push(`  ${green("fixed")} ${bold(label(fix.target))}`);
+    lines.push(`  ${green("fixed")} ${bold(label(fix.target))} ${dim(`via ${fix.via ?? "heuristic"}`)}`);
     lines.push(`    ${red("- " + JSON.stringify(old))}`);
     lines.push(`    ${green("+ " + JSON.stringify(fix.selector))}`);
     for (const p of fix.passes) {
@@ -67,12 +67,19 @@ export function renderRepair(outcome: RepairOutcome, specPath: string): string {
   for (const t of outcome.unresolved) {
     lines.push(`  ${red("unfixed")} ${bold(label(t))} ${dim("no candidate passed every gate")}`);
     for (const r of outcome.rejections.filter((x) => x.target === t)) {
-      lines.push(`    ${dim("tried")} ${r.selector.padEnd(24)} ${red("rejected at " + r.failedGate)} ${dim(r.detail)}`);
+      lines.push(
+        `    ${dim("tried")} ${r.selector.padEnd(24)} ${dim("(" + r.via + ")")} ${red("rejected at " + r.failedGate)} ${dim(r.detail)}`,
+      );
     }
   }
 
   if (outcome.rejectedCount > 0) {
-    lines.push(dim(`  ${outcome.rejectedCount} candidate(s) rejected by verification`));
+    lines.push(
+      dim(
+        `  ${outcome.rejectedCount} candidate(s) rejected by verification` +
+          (outcome.modelUsed ? `, model consulted: ${outcome.modelUsed}` : ""),
+      ),
+    );
   }
   if (outcome.patched) {
     lines.push(dim(`  spec: ${specPath}`));
@@ -117,6 +124,10 @@ export function prBody(outcome: RepairOutcome, specPath: string, stamp: string):
   }
   out.push("```");
   out.push("");
+  if (outcome.modelUsed) {
+    out.push(`**Proposed by:** ${outcome.fixes.map((f) => f.via ?? "heuristic").join(", ")}`);
+    out.push("");
+  }
   out.push("**Verification**");
   out.push("");
   out.push("| target | page | result |");

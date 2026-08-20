@@ -15,6 +15,31 @@ export interface FieldSpec {
   attr?: string;
 }
 
+/**
+ * Credentials are named, never stored. The spec holds the NAME of an
+ * environment variable; the value is resolved at fetch time. A spec file stays
+ * safe to commit.
+ */
+export interface AuthSpec {
+  /** Header name -> environment variable holding its value. */
+  headerEnv?: Record<string, string>;
+  /** Environment variable holding a full Cookie header value. */
+  cookieEnv?: string;
+  /** Environment variable names for HTTP basic auth. */
+  basicEnv?: { user: string; pass: string };
+}
+
+export interface PaginateSpec {
+  /** Selector for the next-page link. Its href is followed. */
+  next?: string;
+  /** URL pattern containing {page}, used instead of following links. */
+  urlTemplate?: string;
+  /** First page number for urlTemplate. Defaults to 1. */
+  startPage?: number;
+  /** Hard cap on pages fetched. Required: an uncapped crawler is a bug. */
+  maxPages: number;
+}
+
 export interface ScraperSpec {
   name: string;
   url: string;
@@ -22,6 +47,8 @@ export interface ScraperSpec {
   row?: string;
   fields: Record<string, FieldSpec>;
   expect?: { rows?: { min?: number; max?: number } };
+  auth?: AuthSpec;
+  paginate?: PaginateSpec;
 }
 
 /**
@@ -56,22 +83,36 @@ export interface FetchResult {
   ms: number;
 }
 
+export interface FetchedPages {
+  /** The first page. Cause classification always judges this one. */
+  primary: FetchResult;
+  /** Every page fetched, including the first. */
+  pages: FetchResult[];
+}
+
 export type Cell = string | number | string[] | null;
 export type Row = Record<string, Cell>;
 
 export interface CheckResult {
   spec: ScraperSpec;
+  /** The first page. Cause classification always judges this one. */
   fetched: FetchResult;
+  /** Every page fetched, including the first. */
+  pages: FetchResult[];
   rows: Row[];
   violations: Violation[];
   cause: Cause;
   causeDetail: string;
+  /** Meaning-level warnings. Never a trigger for automatic repair. */
+  drift: import("./history.js").DriftFinding[];
 }
 
 export interface Candidate {
   /** Which part of the spec this replaces: a field name, or "__row__". */
   target: string;
   selector: string;
+  /** Which proposer produced this: "heuristic", or a model name. */
+  via?: string;
   /** Heuristic confidence before verification, 0..1. */
   score: number;
   reason: string;

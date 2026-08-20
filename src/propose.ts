@@ -248,5 +248,6 @@ function proposeRow(input: ProposalInput): Candidate[] {
 }
 
 export function propose(input: ProposalInput): Candidate[] {
-  return input.target === ROW_TARGET ? proposeRow(input) : proposeField(input);
+  const out = input.target === ROW_TARGET ? proposeRow(input) : proposeField(input);
+  return out.map((c) => ({ ...c, via: "heuristic" }));
 }
