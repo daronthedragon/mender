@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Pricing — Example Co</title></head>
+<body>
+<!--
+  The dangerous shape. The record container is gone; the cards are now grouped
+  two-per-wrapper. A repairer that latches onto ".pair" gets rows that pass the
+  contract - the right KIND of values, a plausible row count - while silently
+  dropping half the data and mis-associating the rest: each row reports the
+  first plan's name and the first plan's price, and Scale disappears entirely.
+
+  Every existing gate is satisfied. Live passes. The archive is untouched
+  because ".pair" does not exist there. Continuity passes because the values
+  it captures really are currency. Nothing notices that 3 records became 2.
+-->
+<header class="site-header"><nav><a href="/">Home</a></nav></header>
+<main class="page">
+  <h1>Plans that scale with you</h1>
+  <section class="pricing-grid">
+    <div class="pair">
+      <article><h3 class="plan-title">Starter</h3><p class="amount">$19</p>
+        <ul><li>1 project<li>5 GB storage<li>Email support</ul></article>
+      <article><h3 class="plan-title">Pro</h3><p class="amount">$49</p>
+        <ul><li>10 projects<li>100 GB storage<li>Priority support</ul></article>
+    </div>
+    <div class="pair">
+      <article><h3 class="plan-title">Scale</h3><p class="amount">$199</p>
+        <ul><li>Unlimited projects<li>1 TB storage<li>24/7 support</ul></article>
+      <article><h3 class="plan-title">Enterprise</h3><p class="amount">$499</p>
+        <ul><li>Everything in Scale<li>Dedicated support<li>SLA</ul></article>
+    </div>
+  </section>
+</main>
+</body>
+</html>

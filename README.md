@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/daronthedragon/mender/actions/workflows/test.yml"><img src="https://github.com/daronthedragon/mender/actions/workflows/test.yml/badge.svg" alt="tests"></a>
   <img src="https://img.shields.io/badge/dependencies-0-14B8A6" alt="zero dependencies">
-  <img src="https://img.shields.io/badge/tests-484-14B8A6" alt="484 tests">
+  <img src="https://img.shields.io/badge/tests-502-14B8A6" alt="502 tests">
   <img src="https://img.shields.io/badge/node-%E2%89%A520-334155" alt="node >= 20">
   <img src="https://img.shields.io/badge/license-MIT-334155" alt="MIT">
 </p>
@@ -48,7 +48,7 @@ cause: OK
 ## Contents
 
 - [Install](#install) · [Five-minute tour](#five-minute-tour)
-- [The idea](#the-idea) — [contracts](#1-a-contract-not-a-selector), [causes](#2-the-cause-classifier-is-the-safety-feature), [unions](#3-repairs-are-unions-not-overwrites), [gates](#4-three-gates)
+- [The idea](#the-idea) — [contracts](#1-a-contract-not-a-selector), [causes](#2-the-cause-classifier-is-the-safety-feature), [unions](#3-repairs-are-unions-not-overwrites), [gates](#4-four-gates)
 - [Watch mode](#watch-mode) · [Notifications](#notifications)
 - [The model](#the-model-is-optional-and-never-in-the-hot-path) · [Drift](#semantic-drift)
 - [Rendering, pagination, auth](#rendering-pagination-and-auth) · [Fixtures](#fixtures)
@@ -175,14 +175,15 @@ After a real layout change the old markup is gone from the live page, and the ne
 
 The old branch keeps matching pages that used to work; the new branch matches today's. Fixtures stay a usable regression gate instead of a blocker, and selectors accumulate history rather than losing it.
 
-### 4. Three gates
+### 4. Four gates
 
-Every proposal — heuristic or model — must clear all three:
+Every proposal — heuristic or model — must clear all four:
 
 | Gate | Question | Catches |
 | --- | --- | --- |
 | **live** | Does the union clear the violations it targets? | Proposals that don't work. |
 | **archive** | Does it extract *byte-identical* data from every stored snapshot? | A new branch that also matches something on the old pages, silently rewriting history. |
+| **coverage** | Do the rows still reach as much of the page as they used to? | Records carved up wrongly — a selector that grabs two records per match and drops half the page. |
 | **continuity** | Do the values still mean the same thing? | The wrong element. |
 
 Gate three exists because the first two can both pass on a bad fix. If a price is genuinely gone and a star rating sits nearby, the rating satisfies `type: number, min: 1` today and matches nothing in the archives — gates one and two are happy:
@@ -194,7 +195,17 @@ unfixed price no candidate passed every gate
                                                and the median moved 90% (49 to 4.8)
 ```
 
-It changes nothing and shows you what it considered. **Continuity checks meaning, not formatting** — `$19` becoming `19.00` or `19 dollars` is accepted as the same value reformatted, because kind is checked first and magnitude decides when kind changes.
+It changes nothing and shows you what it considered. **Coverage asks a different question from the other three.** They ask whether each *value* is right; coverage asks whether the *records were carved up right*. A row selector that grabs two records per match satisfies everything else — the right kind of values, a plausible row count, archives untouched because the new selector isn't in them — while silently dropping half the page:
+
+```
+tried .pair  rejected at coverage  the rows reach only 2 of 4 plan element(s) on the page
+                                   (50%, archives reached 100%) - 2 record(s) would be
+                                   silently dropped
+```
+
+It doesn't need to know the right grouping. The document still contains the field elements; the row structure just stopped reaching them, and comparing that fraction against the archive is enough. Rejecting the wrong grouping also keeps the search going — in that example it goes on to find `.pair > article`, which recovers all four records.
+
+**Continuity checks meaning, not formatting** — `$19` becoming `19.00` or `19 dollars` is accepted as the same value reformatted, because kind is checked first and magnitude decides when kind changes.
 
 ## Watch mode
 
@@ -268,7 +279,7 @@ export ANTHROPIC_API_KEY=sk-...
 mender repair scrapers/pricing.json --model
 ```
 
-Its proposals face the identical three gates. Four properties the tests pin down:
+Its proposals face the identical four gates. Four properties the tests pin down:
 
 - A page the heuristics already solved **never reaches the model** — no token spent on a solved problem.
 - A `BLOCKED` page never reaches it either; the classifier stops before any proposer runs.
@@ -685,12 +696,12 @@ Named honestly, because a self-healing tool that overstates itself is the worst 
 - **Inference is a first draft.** `init` proposes types and bounds from one page; read the generated spec.
 - **Drift from a thin baseline is noisy** — hence `provisional`.
 - **No JS interaction.** The browser renders and waits; it doesn't click, scroll or fill forms, so content behind "load more" is out of reach.
-- **Continuity is per-field.** A change that keeps every field plausible alone but breaks the relationship between them — prices shifted one row up — passes everything.
+- **Cross-field relationships are only checked structurally.** Coverage catches records being carved up wrongly, but a change that keeps every field plausible *and* every record reachable while pairing them differently — prices shifted one row up within the same rows — would still pass.
 - **No proxy rotation or anti-bot evasion**, deliberately. `BLOCKED` means back off.
 
 ## Tests
 
-484 assertions. No network beyond servers the suite starts itself, and no API key — the model path runs through an injected fake client. The browser suite adapts to whether Playwright is present rather than skipping silently, so CI (which has no Playwright) reports a slightly lower count.
+502 assertions. No network beyond servers the suite starts itself, and no API key — the model path runs through an injected fake client. The browser suite adapts to whether Playwright is present rather than skipping silently, so CI (which has no Playwright) reports a slightly lower count.
 
 ```bash
 npm test

@@ -1,5 +1,6 @@
 import type { ElementNode } from "./html.js";
-import { extract, toRows } from "./extract.js";
+import { extract, rowElements, toRows } from "./extract.js";
+import { querySelectorAll } from "./select.js";
 import { validate } from "./contract.js";
 import { ROW_TARGET } from "./propose.js";
 import type { Candidate, ScraperSpec, VerifiedCandidate, Violation } from "./types.js";
@@ -154,6 +155,85 @@ function mid(values: number[]): number | null {
   return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
 }
 
+/** How far the captured fraction may fall before a repair is refused. */
+const COVERAGE_TOLERANCE = 0.25;
+
+/**
+ * How many elements a field selector finds in the whole document, and how many
+ * of those the row structure actually uses. A scalar field uses at most one per
+ * row; a list uses all of them.
+ */
+function capture(doc: ElementNode, spec: ScraperSpec, field: string): { used: number; total: number } {
+  const f = spec.fields[field];
+  if (!f) return { used: 0, total: 0 };
+
+  let total = 0;
+  try {
+    total = querySelectorAll(doc, f.selector).length;
+  } catch {
+    return { used: 0, total: 0 };
+  }
+
+  let used = 0;
+  for (const row of rowElements(doc, spec)) {
+    let hits = 0;
+    try {
+      hits = querySelectorAll(row, f.selector).length;
+    } catch {
+      hits = 0;
+    }
+    used += f.type === "list" ? hits : Math.min(1, hits);
+  }
+  return { used, total };
+}
+
+/**
+ * Gate four. The first three ask whether each value is right; this asks whether
+ * the records were carved up right.
+ *
+ * A row selector that groups two records per match produces rows that satisfy
+ * everything else - the right kind of values, a plausible row count, archives
+ * untouched because the new selector does not exist there - while silently
+ * dropping half the page and mis-associating the rest. The symptom is that the
+ * document still contains the field elements; the row structure just stopped
+ * reaching them. Comparing the captured fraction against the archive catches it
+ * without needing to know what the right grouping is.
+ */
+function coverageOk(
+  spec: ScraperSpec,
+  patched: ScraperSpec,
+  live: ElementNode,
+  goldens: { source: string; doc: ElementNode }[],
+): { ok: boolean; detail: string } {
+  if (goldens.length === 0) return { ok: true, detail: "no archive to compare capture against" };
+
+  for (const field of Object.keys(spec.fields)) {
+    const before: number[] = [];
+    for (const g of goldens) {
+      const c = capture(g.doc, spec, field);
+      if (c.total > 0) before.push(c.used / c.total);
+    }
+    if (before.length === 0) continue;
+
+    const after = capture(live, patched, field);
+    if (after.total === 0) continue;
+
+    const wasRatio = before.reduce((a, b) => a + b, 0) / before.length;
+    const nowRatio = after.used / after.total;
+    if (wasRatio - nowRatio > COVERAGE_TOLERANCE) {
+      const missed = after.total - after.used;
+      return {
+        ok: false,
+        detail:
+          `the rows reach only ${after.used} of ${after.total} ${field} element(s) on the page ` +
+          `(${Math.round(nowRatio * 100)}%, archives reached ${Math.round(wasRatio * 100)}%) ` +
+          `- ${missed} record(s) would be silently dropped`,
+      };
+    }
+  }
+  return { ok: true, detail: "rows reach as much of the page as they used to" };
+}
+
 export interface VerifyInput {
   spec: ScraperSpec;
   candidate: Candidate;
@@ -223,6 +303,9 @@ export function verifyCandidate(input: VerifyInput): VerifiedCandidate {
       passes.push({ source: g.source, ok: false, detail: `selector error: ${(e as Error).message}` });
     }
   }
+
+  const coverage = coverageOk(spec, patched, live.doc, goldens);
+  passes.push({ source: "coverage", ok: coverage.ok, detail: coverage.detail });
 
   const continuity = continuityOk(spec, patched, candidate.target, live.doc, goldens);
   passes.push({ source: "continuity", ok: continuity.ok, detail: continuity.detail });

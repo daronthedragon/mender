@@ -3,6 +3,52 @@
 All notable changes to this project are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] — 2026-08-20
+
+### Fixed — a repair could silently drop half your data
+
+The three verification gates all ask whether a *value* is right. None of them
+asked whether the *records were carved up right*, and that gap was exploitable
+by an entirely ordinary layout change.
+
+A page that regroups its records — cards that were siblings now sitting two to
+a wrapper — let a repair land on the wrapper. That candidate passed every gate:
+the contract was satisfied (a plausible row count, the right kind of values),
+the archive was byte-identical because the new selector does not exist there,
+and continuity was happy because the values it captured really were currency.
+
+The result, on a four-record page, was accepted silently:
+
+```
+  data : [{"plan":"Starter","price":19},{"plan":"Scale","price":199}]
+  truth: Starter 19, Pro 49, Scale 199, Enterprise 499
+```
+
+Two records vanished and the survivors kept only the first plan in each pair.
+This is precisely the silently-wrong-data failure the whole project exists to
+prevent, and it was reachable from a normal site redesign.
+
+### Added — a fourth gate: coverage
+
+Coverage compares the fraction of a field's elements the row structure actually
+reaches against the fraction the archive reached. It needs no knowledge of what
+the correct grouping is — the document still contains the elements, the rows
+just stopped reaching them:
+
+```
+tried .pair  rejected at coverage  the rows reach only 2 of 4 plan element(s) on
+                                   the page (50%, archives reached 100%) -
+                                   2 record(s) would be silently dropped
+```
+
+Rejecting the wrong grouping also keeps the search alive: on the same page the
+repairer goes on to find `.pair > article` and recovers all four records with
+each price attached to its own plan.
+
+Legitimate repairs are unaffected — moved fields, renamed row containers and
+unchanged pages all still pass, with tests asserting each.
+
+502 assertions, up from 484.
 ## [1.0.0] — 2026-08-20
 
 First stable release. The API surface below is what 1.x will keep.
