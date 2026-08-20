@@ -1,13 +1,22 @@
-# Publishes to npm when a v* tag is pushed.
+# Publishes to npm.
 #
-# Requires an NPM_TOKEN repository secret (an npm automation token). Without it
-# the publish step is skipped rather than failing, so tagging a release still
-# works for anyone installing straight from the git url.
+# Fires on a v* tag, or manually from the Actions tab (useful when the tag is
+# already pushed and you have only just added the token).
+#
+# Requires an NPM_TOKEN repository secret. Without it the publish step is
+# skipped rather than failing, so tagging a release still works for anyone
+# installing straight from the git url.
 name: release
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Tag to publish, e.g. v1.0.0"
+        required: true
+        default: v1.0.0
 
 permissions:
   contents: read
@@ -21,6 +30,10 @@ jobs:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # A manual run checks out the tag it was given; a tag push is already there.
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -31,7 +44,8 @@ jobs:
 
       - name: Check the tag matches package.json
         run: |
-          tag="${GITHUB_REF_NAME#v}"
+          tag="${{ github.event.inputs.ref || github.ref_name }}"
+          tag="${tag#v}"
           pkg=$(node -p "require('./package.json').version")
           if [ "$tag" != "$pkg" ]; then
             echo "tag $tag does not match package.json $pkg" >&2
@@ -45,9 +59,16 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --provenance --access public
 
+      - name: Confirm it is live
+        if: env.NPM_TOKEN != ''
+        run: |
+          sleep 10
+          npm view @daronthedragon/mender version
+
       - name: No token, no publish
         if: env.NPM_TOKEN == ''
         run: |
           echo "NPM_TOKEN is not set, so nothing was published."
-          echo "The tag and GitHub release still stand; install with:"
-          echo "  npm install github:daronthedragon/mender#${GITHUB_REF_NAME}"
+          echo "Add it under Settings > Secrets and variables > Actions, then re-run this workflow."
+          echo "Until then, install with:"
+          echo "  npm install github:daronthedragon/mender"
