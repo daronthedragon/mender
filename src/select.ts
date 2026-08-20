@@ -330,9 +330,152 @@ export function matches(
  */
 export function querySelectorAll(root: ElementNode, selector: string): ElementNode[] {
   const groups = parseSelector(selector);
-  return descendants(root).filter((el) =>
-    groups.some((seq) => matchSequence(el, seq, seq.length - 1, root)),
-  );
+  const candidates = narrow(root, groups);
+  const out: ElementNode[] = [];
+  for (let i = 0; i < candidates.length; i++) {
+    const el = candidates[i]!;
+    for (let g = 0; g < groups.length; g++) {
+      const seq = groups[g]!;
+      if (matchSequence(el, seq, seq.length - 1, root)) {
+        out.push(el);
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/* ---------- candidate narrowing ---------- */
+
+/*
+ * An element can only satisfy a sequence if it satisfies the sequence's
+ * rightmost compound, and that compound almost always names an id, a class or a
+ * tag. Indexing a root by those three keys turns "test every descendant" into
+ * "test the handful that could possibly match".
+ *
+ * The index is built on the *second* query against a root, so a root that is
+ * only ever queried once still pays a single linear scan and nothing more.
+ * Repair queries the same row hundreds of times, which is where this pays off.
+ */
+
+type IndexKey = { kind: "id" | "class" | "tag" | "attr"; value: string };
+
+/** Positions into `descendants(root)`, so merges stay in document order. */
+interface RootIndex {
+  byId: Map<string, number[]>;
+  byClass: Map<string, number[]>;
+  byTag: Map<string, number[]>;
+  /** Attribute name -> elements carrying it. Filled per name, on demand. */
+  byAttr: Map<string, number[]>;
+  all: ElementNode[];
+}
+
+const rootIndexes = new WeakMap<ElementNode, RootIndex>();
+const rootQueries = new WeakMap<ElementNode, number>();
+const groupKeys = new WeakMap<Compound[][], (IndexKey | null)[]>();
+
+function keyOfCompound(c: Compound): IndexKey | null {
+  let tag: string | null = null;
+  let cls: string | null = null;
+  let attr: string | null = null;
+  const simples = c.simples;
+  for (let i = 0; i < simples.length; i++) {
+    const s = simples[i]!;
+    if (s.kind === "id") return { kind: "id", value: s.value };
+    if (s.kind === "class") { if (cls === null) cls = s.value; }
+    else if (s.kind === "tag") { if (tag === null) tag = s.value; }
+    else if (s.kind === "attr") { if (attr === null) attr = s.name; }
+  }
+  if (cls !== null) return { kind: "class", value: cls };
+  if (attr !== null) return { kind: "attr", value: attr };
+  if (tag !== null) return { kind: "tag", value: tag };
+  return null;
+}
+
+function keysFor(groups: Compound[][]): (IndexKey | null)[] {
+  let keys = groupKeys.get(groups);
+  if (keys === undefined) {
+    keys = groups.map((g) => keyOfCompound(g[g.length - 1]!));
+    groupKeys.set(groups, keys);
+  }
+  return keys;
+}
+
+function put(map: Map<string, number[]>, key: string, pos: number): void {
+  const arr = map.get(key);
+  if (arr === undefined) map.set(key, [pos]);
+  else if (arr[arr.length - 1] !== pos) arr.push(pos);
+}
+
+function buildIndex(root: ElementNode): RootIndex {
+  const all = descendants(root);
+  const byId = new Map<string, number[]>();
+  const byClass = new Map<string, number[]>();
+  const byTag = new Map<string, number[]>();
+  for (let i = 0; i < all.length; i++) {
+    const el = all[i]!;
+    put(byTag, el.tag, i);
+    const id = el.attrs["id"];
+    if (id !== undefined) put(byId, id, i);
+    const cls = classList(el);
+    for (let j = 0; j < cls.length; j++) put(byClass, cls[j]!, i);
+  }
+  return { byId, byClass, byTag, byAttr: new Map(), all };
+}
+
+const NO_MATCH: number[] = [];
+
+function bucket(idx: RootIndex, key: IndexKey): number[] {
+  if (key.kind === "attr") {
+    let hit = idx.byAttr.get(key.value);
+    if (hit === undefined) {
+      hit = [];
+      const all = idx.all;
+      for (let i = 0; i < all.length; i++) {
+        if (all[i]!.attrs[key.value] !== undefined) hit.push(i);
+      }
+      idx.byAttr.set(key.value, hit);
+    }
+    return hit;
+  }
+  const map = key.kind === "id" ? idx.byId : key.kind === "class" ? idx.byClass : idx.byTag;
+  return map.get(key.value) ?? NO_MATCH;
+}
+
+/** The elements worth testing, in document order. */
+function narrow(root: ElementNode, groups: Compound[][]): ElementNode[] {
+  const keys = keysFor(groups);
+  for (let i = 0; i < keys.length; i++) if (keys[i] === null) return descendants(root);
+
+  let idx = rootIndexes.get(root);
+  if (idx === undefined) {
+    const seen = (rootQueries.get(root) ?? 0) + 1;
+    if (seen < 2) {
+      rootQueries.set(root, seen);
+      return descendants(root);
+    }
+    idx = buildIndex(root);
+    rootIndexes.set(root, idx);
+  }
+
+  if (keys.length === 1) {
+    const positions = bucket(idx, keys[0]!);
+    const all = idx.all;
+    const out: ElementNode[] = new Array(positions.length);
+    for (let i = 0; i < positions.length; i++) out[i] = all[positions[i]!]!;
+    return out;
+  }
+
+  const merged = new Set<number>();
+  for (let i = 0; i < keys.length; i++) {
+    const positions = bucket(idx, keys[i]!);
+    for (let j = 0; j < positions.length; j++) merged.add(positions[j]!);
+  }
+  const sorted = [...merged].sort((a, b) => a - b);
+  const all = idx.all;
+  const out: ElementNode[] = new Array(sorted.length);
+  for (let i = 0; i < sorted.length; i++) out[i] = all[sorted[i]!]!;
+  return out;
 }
 
 export function querySelector(root: ElementNode, selector: string): ElementNode | null {
