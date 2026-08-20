@@ -675,8 +675,10 @@ to run) and **all fixtures stale** (no known-good reference survives).
 
 ## Continuous integration
 
+The action is listed on the GitHub Marketplace as **Mend the Gap** — the repo, package and CLI are all still `mender`, and `uses:` takes the repo path either way.
+
 ```yaml
-# published to the Marketplace as "Selector Sentinel"
+# listed on the GitHub Marketplace as "Mend the Gap"
 - uses: daronthedragon/mender@v1
   with:
     command: check
