@@ -145,7 +145,19 @@ export function detectDrift(
   const minHistory = opts.minHistory ?? 3;
 
   const baseline = history.filter((r) => r.ts !== current.ts);
-  if (baseline.length < minHistory) return [];
+
+  // A fixture is a deliberate known-good snapshot, which is stronger evidence
+  // than a routine run, so one is enough to start judging. The trade-off is a
+  // baseline with no sense of variance, which the detail line admits to rather
+  // than hiding. Drift is advisory, so being early and honest beats being late.
+  const fixtureSeeded = baseline.some((r) => r.ts.startsWith("fixture:"));
+  const effectiveMin = fixtureSeeded ? 1 : minHistory;
+  if (baseline.length < effectiveMin) return [];
+
+  const provisional = baseline.length < minHistory;
+  const note = provisional
+    ? ` (provisional: only ${baseline.length} reference observation${baseline.length === 1 ? "" : "s"})`
+    : "";
 
   const findings: DriftFinding[] = [];
 
@@ -156,14 +168,14 @@ export function detectDrift(
       findings.push({
         field: "__rows__",
         code: "ROW_COUNT_SHIFT",
-        detail: `row count ${current.rows} against a baseline median of ${baseRows} (${Math.round(delta * 100)}% change)`,
+        detail: `row count ${current.rows} against a baseline median of ${baseRows} (${Math.round(delta * 100)}% change)${note}`,
       });
     }
   }
 
   for (const [name, stats] of Object.entries(current.fields)) {
     const past = baseline.map((r) => r.fields[name]).filter((s): s is FieldStats => Boolean(s));
-    if (past.length < minHistory) continue;
+    if (past.length < effectiveMin) continue;
 
     const pastKinds: Record<string, number> = {};
     for (const p of past) {
@@ -175,7 +187,7 @@ export function detectDrift(
       findings.push({
         field: name,
         code: "KIND_SHIFT",
-        detail: `values now read as ${isKind}, historically ${wasKind}`,
+        detail: `values now read as ${isKind}, historically ${wasKind}${note}`,
       });
     }
 
@@ -188,7 +200,7 @@ export function detectDrift(
         findings.push({
           field: name,
           code: "MAGNITUDE_SHIFT",
-          detail: `median ${stats.median} is ${Math.round(delta * 100)}% ${direction} from a baseline of ${baseMedian}`,
+          detail: `median ${stats.median} is ${Math.round(delta * 100)}% ${direction} from a baseline of ${baseMedian}${note}`,
         });
       }
     }
@@ -200,7 +212,7 @@ export function detectDrift(
       findings.push({
         field: name,
         code: "NULL_RATE_SHIFT",
-        detail: `${Math.round(nullRate * 100)}% of values are now empty, historically ${Math.round(pastNullRate * 100)}%`,
+        detail: `${Math.round(nullRate * 100)}% of values are now empty, historically ${Math.round(pastNullRate * 100)}%${note}`,
       });
     }
   }

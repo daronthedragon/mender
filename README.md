@@ -5,29 +5,51 @@ Scrapers don't crash when they break. They return `[]`, or `null`, or yesterday'
 `mender` watches for that, works out **why** it happened, and only then proposes a selector fix — which it has to prove against every page that used to work before you'll ever see it.
 
 ```
+mender init <url> ─→ a working spec, inferred from the page
+
 run ─→ contract check ─→ pass ─→ drift check ─→ done
-              │
-              └─ fail ─→ WHY? ─┬─ bot-check page  ─→ back off, selectors untouched
-                               ├─ 404 / redirect  ─→ different bug, not a selector
-                               ├─ missing credential ─→ config error, not a selector
-                               ├─ empty response  ─→ transport, not a selector
-                               └─ page fine, data wrong
-                                        ↓
-                              heuristics propose ─→ (empty?) ─→ model proposes
-                                        ↓                            ↓
-                                        └──────── 3 gates ───────────┘
-                                                   │
-                                          fail ────┴──── pass
-                                            ↓             ↓
-                                  report near-misses,  open a PR
-                                  change nothing
+            │
+            └─ fail ─→ WHY? ─┬─ bot-check page     ─→ back off, selectors untouched
+                             ├─ 404 / redirect     ─→ different bug, not a selector
+                             ├─ missing credential ─→ config error, not a selector
+                             ├─ empty response     ─→ transport, not a selector
+                             └─ page fine, data wrong
+                                      ↓
+                            heuristics propose ─→ (empty?) ─→ model proposes
+                                      ↓                            ↓
+                                      └──────── 3 gates ───────────┘
+                                                 │
+                                        fail ────┴──── pass
+                                          ↓             ↓
+                                report near-misses,  open a PR
+                                change nothing
 ```
 
 Zero runtime dependencies. Own HTML parser, own CSS selector engine, plain `fetch`.
 
+## Start without writing a selector
+
+```bash
+mender init https://example.com/pricing
+```
+
+```
+wrote scrapers/pricing.json
+  found 3 repeating records matching ".pricing-card"
+  proposed 4 field(s): plan_title, amount, features, cta
+  dropped 16 redundant column(s) already covered by a field above
+  features matched several elements per record, so typed as list
+  verified: 3 rows pass the generated contract
+  archived fixtures/pricing/2026-08-20.html as the first reference
+```
+
+It finds the repeating record, proposes fields for the values inside it, infers types from the data, names them from the markup, **proves the result passes before claiming it**, and archives the page as the first reference. Tables and card grids both work.
+
+The generated spec is a starting point, not an oracle — but it is a starting point that already runs, and everything below then defends it.
+
 ## The loop
 
-**1. Declare a contract, not just a selector.**
+**1. A contract, not just a selector.**
 
 ```json
 {
@@ -78,7 +100,7 @@ $ mender repair scrapers/pricing.json
       ok continuity   values still read as currency
 ```
 
-`--write` applies it, `--pr-body out.md` writes the pull request.
+`--write` applies it, `--pr-body out.md` writes the pull request, `--only price` applies just one target when a repair touched several.
 
 ## Why it's a union selector
 
@@ -94,20 +116,28 @@ A proposal has to clear all three before you see it — whoever proposed it.
 | --- | --- | --- |
 | **live** | Does the union clear the violations it targets? | Proposals that simply don't work. |
 | **archive** | Does it extract *byte-identical* data from every stored snapshot? | A new branch that also matches something on the old pages, quietly shifting historical values. |
-| **continuity** | Do the values still read as the same *kind* of thing? | The wrong element. `$19 → $19.00` passes; `$19 → 4.8` does not. |
+| **continuity** | Do the values still mean the same thing? | The wrong element. |
 
 Gate three exists because gates one and two can both pass on a bad fix. If the price is genuinely gone and a star rating sits nearby, the rating satisfies `type: number, min: 1` on the live page and matches nothing on the archives — so the first two gates are happy. Only asking "is this still a price" catches it:
 
 ```
 $ mender repair scrapers/pricing.json      # price replaced by "Talk to sales"
   unfixed price no candidate passed every gate
-    tried .rating-value    rejected at continuity  values now read as numeric, archived pages had currency
-    tried p.rating-value   rejected at continuity  values now read as numeric, archived pages had currency
-    tried p:nth-child(3)   rejected at continuity  values now read as numeric, archived pages had currency
+    tried .rating-value    rejected at continuity  values now read as numeric,
+                                                   archived pages had currency,
+                                                   and the median moved 90% (49 to 4.8)
   4 candidate(s) rejected by verification
 ```
 
 It changes nothing and tells you what it considered. That is the correct outcome.
+
+**Continuity checks meaning, not formatting.** A site reformatting `$19` to `19.00` or `19 dollars` changes the *kind* of the value while the value itself is plainly the same, and refusing that would be a false rejection costing a human a manual fix. So kind is checked first, and when it changes, the magnitude decides:
+
+```
+ok continuity   format changed to numeric but the values are continuous (median 19 against 19)
+```
+
+A star rating is not a reformatted price — it is a different number — so the trap stays rejected on exactly the same rule.
 
 ## The cause classifier is the safety feature
 
@@ -147,7 +177,7 @@ And when it is wrong, it is refused exactly like a heuristic:
 
 ```
   unfixed price no candidate passed every gate
-    tried [class="rating-value"]  (claude-sonnet-5)  rejected at continuity  values now read as numeric, archived pages had currency
+    tried [class="rating-value"]  (claude-sonnet-5)  rejected at continuity  ...
 ```
 
 Four properties the tests pin down:
@@ -184,7 +214,27 @@ That run had **zero contract violations**. Four signals are tracked against run 
 
 Drift is **a warning for a human, never a trigger for a repair**. Rewriting a selector because a price started including tax would be exactly the wrong move, and there is a test asserting it does not happen.
 
+**It works from the first run.** A new scraper has no run history, but its archived fixtures are already dated observations of the same page, so they seed the baseline. A single fixture gives no sense of variance, so findings drawn from a thin baseline say so rather than hiding it:
+
+```
+~ price: median 58.8 is 20% up from a baseline of 49 (provisional: only 1 reference observation)
+```
+
 Drift is judged only on a structurally sound run — a broken selector would otherwise report itself as a dramatic change in meaning.
+
+## Client-rendered pages
+
+Most scraping targets are server-rendered, and a browser is a large dependency. Rather than charge every user for it, Playwright is an **optional peer dependency**, loaded lazily and only when a spec asks to render:
+
+```json
+"render": { "waitFor": ".pricing-card", "waitMs": 200 }
+```
+
+```bash
+npm install playwright && npx playwright install chromium
+```
+
+Without it, `mender` installs with zero dependencies and works fully on server-rendered pages; a spec that asks for rendering without it fails with an error that says how to fix it. Pagination, auth, loop guards and failure semantics are identical on both transports — a failed render is status `0`, so it can never be mistaken for a repairable page.
 
 ## Pagination
 
@@ -241,19 +291,22 @@ npm test
 ## Commands
 
 ```
-mender check   [path]   run every scraper (or one spec) against its contract
-mender extract <spec>   print the rows a spec currently produces, as JSON
-mender fixture <spec>   archive today's page as a golden snapshot
-mender repair  <spec>   diagnose, propose, verify, show the diff
-mender drift   [path]   report meaning-level drift against run history
+mender init <url> [name]   infer a spec from a live page and archive the first fixture
+mender check   [path]      run every scraper (or one spec) against its contract
+mender extract <spec>      print the rows a spec currently produces, as JSON
+mender fixture <spec>      archive today's page as a golden snapshot
+mender repair  <spec>      diagnose, propose, verify, show the diff
+mender drift   [path]      report meaning-level drift against run history
 
 --scrapers <dir>     spec directory                (default: scrapers)
 --fixtures <dir>     snapshot directory            (default: fixtures)
 --html <file>        use a local file instead of fetching
 --write              apply the verified fix to the spec
+--only <targets>     with --write: apply only these ("row" for the row selector)
 --pr-body <file>     write a pull-request body
 --model              ask a model when the heuristics come up empty
 --record             append this run to the history file
+--render             init: load the page in a browser first
 --prune              fixture: retire snapshots that stopped being useful
 --max-age-days <n>   fixture --prune: age limit for failing snapshots (default 180)
 --keep <n>           fixture --prune: how many snapshots to keep (default 10)
@@ -295,30 +348,34 @@ node dist/cli.js repair examples/scrapers/pricing.json --fixtures examples/fixtu
 
 Named honestly, because a self-healing tool that overstates itself is the worst kind.
 
-- **No browser.** Plain `fetch` only, so client-rendered pages are out. Adding one means a real runtime dependency, which is the one property this project hasn't spent yet.
-- **Continuity can false-reject a legitimate reformat.** If a price changes from `$19` to `19 dollars` the kind changes and a correct repair is refused. Refusing costs you a manual fix; accepting a wrong one costs you a database of bad data, so the gate errs the expensive-but-safe way.
-- **Drift needs history.** Three prior runs minimum, so a brand-new scraper is blind until it has a baseline.
-- **`--write` on a multi-target repair is all-or-nothing.** No way to accept the row fix and reject the field fix from the CLI.
+- **Inference is a first draft.** `init` proposes types and bounds from a single page, so a column that happens to be numeric today may be typed `number` wrongly. Read the generated spec.
+- **Drift from a thin baseline is noisy.** One fixture is enough to start judging but gives no sense of variance, which is why those findings are labelled provisional.
+- **No JS interaction.** The browser renders and waits; it does not click, scroll or fill forms, so content behind a "load more" button is out of reach.
+- **Continuity is per-field.** A change that keeps every field plausible on its own but breaks the relationship between them — prices shifted one row up — passes everything.
 
 ## Tests
 
-286 assertions. No network required beyond a local server the suite starts itself, and no API key — the model path is tested through an injected fake client.
+348 assertions with Playwright installed, 344 without: the browser suite adapts rather than being skipped silently. No API key needed — the model path runs through an injected fake client.
 
 ```
 $ npm test
+  browser rendering
   cause classification (the safety gate)
   contracts and config
-  semantic drift
-  fixture retirement
+  continuity: reformats versus wrong elements
+  drift cold start
   extraction
-  real http path
+  fixture retirement
   html parser
   llm proposer
   pagination and auth
+  real http path
   repair, end to end
   selector engine
+  semantic drift
+  spec inference
 
-  286 passed, 0 failed
+  348 passed, 0 failed
 ```
 
 MIT.

@@ -52,10 +52,13 @@ function snapshot(doc: ElementNode, spec: ScraperSpec): string {
  * a star rating that happens to be a number above 1". Deliberately blunt: a
  * price reformatted from "$19" to "$19.00" stays the same kind.
  */
+const CURRENCY_WORDS =
+  /\b(usd|eur|gbp|jpy|cad|aud|chf|cny|inr|dollars?|euros?|pounds?|yen|rupees?|cents?|pence)\b/i;
+
 export function kindOf(text: string): string {
   const t = text.trim();
   if (!t) return "empty";
-  if (/[$€£¥₹]/.test(t) || /\b(usd|eur|gbp|jpy)\b/i.test(t)) return "currency";
+  if (/[$€£¥₹]/.test(t) || CURRENCY_WORDS.test(t)) return "currency";
   if (/^[\d.,\s%+\/-]+$/.test(t)) return "numeric";
   const words = t.split(/\s+/).length;
   return words <= 2 ? "words-short" : words <= 6 ? "words-mid" : "words-long";
@@ -94,13 +97,61 @@ function continuityOk(
   const matching = liveRaw.filter((v) => goldenKinds.has(kindOf(v)));
   const ratio = matching.length / liveRaw.length;
   const liveKinds = [...new Set(liveRaw.map(kindOf))].join("/");
+  if (ratio >= 0.5) return { ok: true, detail: `values still read as ${liveKinds}` };
+
+  // Kind alone is too blunt on its own. A site reformatting "$19" to "19.00"
+  // changes the kind while the value is plainly the same, and refusing that is
+  // a false rejection that costs a human a manual fix. So fall back to the
+  // magnitude: if the numbers themselves are continuous with the archive, the
+  // reformat is accepted. The trap case stays rejected because a star rating is
+  // not merely a differently-formatted price — it is a different number.
+  const field2 = spec.fields[target];
+  if (field2 && field2.type === "number") {
+    const goldenNums: number[] = [];
+    for (const g of goldens) {
+      for (const v of numericValues(g.doc, spec, target)) goldenNums.push(v);
+    }
+    const liveNums = numericValues(live, patched, target);
+    const before = mid(goldenNums);
+    const after = mid(liveNums);
+    if (before !== null && after !== null && before !== 0) {
+      const delta = Math.abs(after - before) / Math.abs(before);
+      if (delta <= MAGNITUDE_TOLERANCE) {
+        return {
+          ok: true,
+          detail: `format changed to ${liveKinds} but the values are continuous (median ${after} against ${before})`,
+        };
+      }
+      return {
+        ok: false,
+        detail: `values now read as ${liveKinds}, archived pages had ${[...goldenKinds].join("/")}, and the median moved ${Math.round(delta * 100)}% (${before} to ${after})`,
+      };
+    }
+  }
+
   return {
-    ok: ratio >= 0.5,
-    detail:
-      ratio >= 0.5
-        ? `values still read as ${liveKinds}`
-        : `values now read as ${liveKinds}, archived pages had ${[...goldenKinds].join("/")}`,
+    ok: false,
+    detail: `values now read as ${liveKinds}, archived pages had ${[...goldenKinds].join("/")}`,
   };
+}
+
+/** How far a median may move before a reformat stops looking like a reformat. */
+const MAGNITUDE_TOLERANCE = 0.25;
+
+function numericValues(doc: ElementNode, spec: ScraperSpec, target: string): number[] {
+  const out: number[] = [];
+  for (const row of extract(doc, spec)) {
+    const v = row.fields[target]?.value;
+    if (typeof v === "number") out.push(v);
+  }
+  return out;
+}
+
+function mid(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const s = [...values].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
 }
 
 export interface VerifyInput {

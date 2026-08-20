@@ -1,5 +1,6 @@
 import { parse } from "./html.js";
 import { querySelector } from "./select.js";
+import type { PageFetcher } from "./browser.js";
 import type { AuthSpec, FetchResult, FetchedPages, ScraperSpec } from "./types.js";
 
 const DEFAULT_UA =
@@ -10,6 +11,9 @@ export interface FetchOptions {
   timeoutMs?: number;
   userAgent?: string;
   headers?: Record<string, string>;
+  /** Render through a browser instead of plain fetch. Supplied by the caller so
+   *  the heavy dependency is never reached for a server-rendered page. */
+  fetcher?: PageFetcher | null;
 }
 
 export class AuthError extends Error {}
@@ -103,9 +107,22 @@ export async function fetchPages(spec: ScraperSpec, opts: FetchOptions = {}): Pr
   const headers = { ...opts.headers, ...authHeaders(spec.auth) };
   const withAuth: FetchOptions = { ...opts, headers };
 
+  // One entry point for both transports, so pagination, auth, loop guards and
+  // failure semantics are identical whether or not a browser is involved.
+  const get = (url: string): Promise<FetchResult> =>
+    opts.fetcher
+      ? opts.fetcher.fetch(url, {
+          ...(spec.render?.waitFor ? { waitFor: spec.render.waitFor } : {}),
+          ...(spec.render?.waitMs ? { waitMs: spec.render.waitMs } : {}),
+          ...(opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}),
+          ...(opts.userAgent ? { userAgent: opts.userAgent } : {}),
+          headers,
+        })
+      : fetchPage(url, withAuth);
+
   const paginate = spec.paginate;
   if (!paginate || paginate.maxPages <= 1) {
-    const primary = await fetchPage(spec.url, withAuth);
+    const primary = await get(spec.url);
     return { primary, pages: [primary] };
   }
 
@@ -118,7 +135,7 @@ export async function fetchPages(spec: ScraperSpec, opts: FetchOptions = {}): Pr
       const url = paginate.urlTemplate.replace("{page}", String(start + i));
       if (seen.has(url)) break;
       seen.add(url);
-      const page = await fetchPage(url, withAuth);
+      const page = await get(url);
       pages.push(page);
       if (page.status !== 200) break;
     }
@@ -129,7 +146,7 @@ export async function fetchPages(spec: ScraperSpec, opts: FetchOptions = {}): Pr
   while (url && pages.length < paginate.maxPages) {
     if (seen.has(url)) break;
     seen.add(url);
-    const page: FetchResult = await fetchPage(url, withAuth);
+    const page: FetchResult = await get(url);
     pages.push(page);
     if (page.status !== 200 || !paginate.next) break;
 

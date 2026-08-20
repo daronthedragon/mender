@@ -3,8 +3,17 @@ import { classify, shouldRepair } from "./classify.js";
 import { brokenFields, rowCountBroken, validate } from "./contract.js";
 import { type ExtractedRow, extract, toRows } from "./extract.js";
 import { AuthError, fetchPages } from "./fetch.js";
+import type { PageFetcher } from "./browser.js";
 import { type LoadedFixture, loadFixtures } from "./fixtures.js";
-import { type DriftFinding, type DriftOptions, appendRun, detectDrift, loadHistory, summarise } from "./history.js";
+import {
+  type DriftFinding,
+  type DriftOptions,
+  type RunRecord,
+  appendRun,
+  detectDrift,
+  loadHistory,
+  summarise,
+} from "./history.js";
 import { type ModelClient, proposeWithModel } from "./llm.js";
 import { ROW_TARGET, propose } from "./propose.js";
 import { applyCandidate, firstVerified } from "./verify.js";
@@ -19,11 +28,41 @@ export interface RunOptions {
   /** Append this run to the history file. */
   record?: boolean;
   drift?: DriftOptions;
+  /** Seed the drift baseline from archived fixtures here. Defaults to historyRoot. */
+  baselineFrom?: string;
+  /** Render through a browser. Supplied by the caller; absent means plain fetch. */
+  fetcher?: PageFetcher | null;
   now?: Date;
 }
 
 function reindex(rows: ExtractedRow[]): ExtractedRow[] {
   return rows.map((r, index) => ({ ...r, index }));
+}
+
+/**
+ * A brand-new scraper has no run history, so drift would stay blind for its
+ * first few runs — exactly the window in which a fresh spec is most likely to
+ * be subtly wrong. Archived fixtures are already dated observations of the same
+ * page, so they seed the baseline. Only fixtures that still pass are used: a
+ * failing one would contribute nonsense statistics.
+ */
+export function withFixtureBaseline(
+  history: RunRecord[],
+  spec: ScraperSpec,
+  fixturesRoot: string | undefined,
+  minHistory: number,
+): RunRecord[] {
+  if (!fixturesRoot || history.length >= minHistory) return history;
+
+  const seeded: RunRecord[] = [];
+  for (const f of loadFixtures(fixturesRoot, spec.name)) {
+    const rows = extract(f.doc, spec);
+    if (validate(rows, spec).length > 0) continue;
+    const ts = `fixture:${f.source}`;
+    if (history.some((h) => h.ts === ts)) continue;
+    seeded.push(summarise(rows, spec, ts));
+  }
+  return [...seeded, ...history];
 }
 
 export async function runCheck(spec: ScraperSpec, opts: RunOptions = {}): Promise<CheckResult> {
@@ -35,7 +74,10 @@ export async function runCheck(spec: ScraperSpec, opts: RunOptions = {}): Promis
     pages = [primary];
   } else {
     try {
-      const fetched = await fetchPages(spec, { ...(opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}) });
+      const fetched = await fetchPages(spec, {
+        ...(opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}),
+        ...(opts.fetcher ? { fetcher: opts.fetcher } : {}),
+      });
       primary = fetched.primary;
       pages = fetched.pages;
     } catch (e) {
@@ -61,16 +103,21 @@ export async function runCheck(spec: ScraperSpec, opts: RunOptions = {}): Promis
     pages.flatMap((p) => extract(p === primary ? primaryDoc : parse(p.html), spec)),
   );
   const violations = validate(extracted, spec);
-  const { cause, detail } = classify(primary, primaryDoc, spec, violations);
+  const { cause, detail } = classify(primary, primaryDoc, spec, violations, extracted.length);
 
   let drift: DriftFinding[] = [];
   if (opts.historyRoot) {
     const ts = (opts.now ?? new Date()).toISOString();
     const record = summarise(extracted, spec, ts);
-    const history = loadHistory(opts.historyRoot, spec.name);
     // Drift is only meaningful when the structure is sound; a broken selector
     // would otherwise report itself as a dramatic change in meaning.
     if (cause === "OK") {
+      const history = withFixtureBaseline(
+        loadHistory(opts.historyRoot, spec.name),
+        spec,
+        opts.baselineFrom ?? opts.historyRoot,
+        opts.drift?.minHistory ?? 3,
+      );
       drift = detectDrift(history, record, opts.drift ?? {});
       if (opts.record) appendRun(opts.historyRoot, spec.name, record);
     }

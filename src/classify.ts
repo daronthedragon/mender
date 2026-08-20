@@ -77,6 +77,7 @@ export function classify(
   doc: ElementNode,
   spec: ScraperSpec,
   violations: Violation[],
+  rowCount = 0,
 ): Classification {
   // 403 and 429 are the shape of being blocked, not of a broken page.
   if (fetched.status === 403 || fetched.status === 429) {
@@ -94,13 +95,14 @@ export function classify(
     };
   }
 
-  // Little text AND almost no structure. Text alone is not enough: a dense
-  // listing of prices and short labels is sparse in characters but is a real
-  // page, and calling it EMPTY would block repair on exactly the pages that
-  // need it most.
+  // A page that yielded records is not empty, whatever its character count.
+  // Text alone was never enough either: a dense client-rendered listing of
+  // short labels ("Pro$49") is sparse in characters and modest in structure,
+  // and calling it EMPTY both mislabels a healthy run and blocks repair on
+  // exactly the pages that need it most.
   const text = normText(doc);
   const elements = descendants(doc).length;
-  if (text.length < 50 && elements < 20) {
+  if (rowCount === 0 && text.length < 50 && elements < 20) {
     return {
       cause: "EMPTY",
       detail: `page carried ${text.length} chars of text across ${elements} elements (${fetched.html.length} bytes of html)`,

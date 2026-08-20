@@ -163,14 +163,14 @@ function proposeField(input: ProposalInput): Candidate[] {
 
 /* ---------- row proposals ---------- */
 
-interface RowGroup {
+export interface RowGroup {
   parent: ElementNode;
   signature: string;
   members: ElementNode[];
 }
 
 /** Repeating sibling groups are what a row selector is always trying to name. */
-function repeatedGroups(doc: ElementNode, minSize: number): RowGroup[] {
+export function repeatedGroups(doc: ElementNode, minSize: number): RowGroup[] {
   const groups: RowGroup[] = [];
   const consider = (parent: ElementNode) => {
     const kids = children(parent);

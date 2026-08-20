@@ -40,6 +40,14 @@ export interface PaginateSpec {
   maxPages: number;
 }
 
+export interface RenderSpec {
+  /** Wait for this selector before reading the page. */
+  waitFor?: string;
+  /** Extra settle time after load, in milliseconds. */
+  waitMs?: number;
+  engine?: "chromium" | "firefox" | "webkit";
+}
+
 export interface ScraperSpec {
   name: string;
   url: string;
@@ -49,6 +57,8 @@ export interface ScraperSpec {
   expect?: { rows?: { min?: number; max?: number } };
   auth?: AuthSpec;
   paginate?: PaginateSpec;
+  /** Present means "this page needs a browser". Absent means plain fetch. */
+  render?: RenderSpec;
 }
 
 /**

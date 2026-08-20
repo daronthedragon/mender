@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { ConfigError, loadSpec, loadSpecs, patchSpecFile } from "./config.js";
 import { runCheck, runRepair } from "./repair.js";
 import { prBody, prTitle, renderCheck, renderRepair } from "./report.js";
@@ -8,11 +9,15 @@ import { anthropicClient } from "./llm.js";
 import { extract } from "./extract.js";
 import { validate } from "./contract.js";
 import { pruneHistory } from "./history.js";
+import { type PageFetcher, playwrightFetcher } from "./browser.js";
+import { formatSpec, inferSpec } from "./init.js";
+import { fetchPage } from "./fetch.js";
 import { dim, green, red, yellow } from "./color.js";
 
 const USAGE = `mender — scrapers that repair themselves
 
 usage:
+  mender init <url> [name]         write a spec by inferring it from a live page
   mender check   [path]            run every scraper (or one spec file) against its contract
   mender extract <spec>            print the rows a spec currently produces, as JSON
   mender fixture <spec>            archive today's page as a golden snapshot (must pass first)
@@ -33,7 +38,23 @@ options:
   --prune            fixture: retire snapshots that have stopped being useful
   --max-age-days <n> fixture --prune: retire failing snapshots older than this (default 180)
   --keep <n>         fixture --prune: keep at most this many snapshots (default 10)
+  --only <targets>   repair --write: apply only these targets (comma separated, "row" for the row selector)
+  --render           init: load the page in a browser first (needs playwright)
 `;
+
+/**
+ * The browser is built lazily and only if something actually asks for it, so an
+ * install without playwright stays fully functional. Held at module scope so a
+ * failing command still releases it.
+ */
+let openBrowser: PageFetcher | null = null;
+
+async function shutdown(): Promise<void> {
+  if (openBrowser) {
+    await openBrowser.close().catch(() => {});
+    openBrowser = null;
+  }
+}
 
 interface Args {
   command: string;
@@ -108,16 +129,93 @@ async function main(): Promise<number> {
     return 0;
   }
 
+  const browserFor = async (specs: { spec: ReturnType<typeof loadSpec> }[]): Promise<PageFetcher | null> => {
+    if (openBrowser) return openBrowser;
+    const needs = specs.some(({ spec }) => spec.render) || args.flags["render"] === true;
+    if (!needs) return null;
+    openBrowser = await playwrightFetcher();
+    return openBrowser;
+  };
+
   switch (args.command) {
+    case "init": {
+      const url = args.positional[0];
+      if (!url) throw new ConfigError("usage: mender init <url> [name]");
+      const name =
+        args.positional[1] ??
+        (() => {
+          try {
+            const u = new URL(url);
+            const stem = u.pathname.replace(/\/+$/, "").split("/").filter(Boolean).pop();
+            return (stem ?? u.hostname).replace(/[^a-zA-Z0-9]+/g, "-").toLowerCase();
+          } catch {
+            return "scraper";
+          }
+        })();
+
+      const local = htmlFrom(args.flags);
+      let html: string;
+      if (local.html !== undefined) {
+        html = local.html;
+      } else {
+        const browser = args.flags["render"] === true ? await playwrightFetcher() : null;
+        const res = browser ? await browser.fetch(url) : await fetchPage(url);
+        if (browser) await browser.close();
+        if (res.status !== 200) {
+          process.stderr.write(red(`fetch failed: HTTP ${res.status} for ${url}\n`));
+          return 1;
+        }
+        html = res.html;
+      }
+
+      const inferred = inferSpec(html, url, name);
+      if (!inferred) {
+        process.stderr.write(
+          red("could not find a repeating record on that page\n") +
+            dim("  a spec needs rows: try a listing or results page, or write the spec by hand\n"),
+        );
+        return 1;
+      }
+
+      const out = join(scrapersDir, `${name}.json`);
+      if (existsSync(out) && args.flags["force"] !== true) {
+        process.stderr.write(red(`${out} already exists; pass --force to overwrite\n`));
+        return 1;
+      }
+      mkdirSync(scrapersDir, { recursive: true });
+      writeFileSync(out, formatSpec(inferred.spec));
+
+      // Prove the generated spec before claiming it works, then archive the
+      // page it was inferred from as the first reference.
+      const verified = await runCheck(inferred.spec, { html });
+      process.stdout.write(green(`wrote ${out}\n`));
+      for (const note of inferred.notes) process.stdout.write(dim(`  ${note}\n`));
+      process.stdout.write(
+        verified.cause === "OK"
+          ? green(`  verified: ${verified.rows.length} rows pass the generated contract\n`)
+          : yellow(`  warning: the generated spec does not pass yet (${verified.cause})\n`),
+      );
+
+      if (verified.cause === "OK") {
+        const fixturePath = saveFixture(fixturesDir, name, html, todayStamp());
+        process.stdout.write(green(`  archived ${fixturePath} as the first reference\n`));
+      }
+      process.stdout.write(dim(`\n  next: mender check ${out}\n`));
+      return verified.cause === "OK" ? 0 : 1;
+    }
+
     case "check": {
       const specs = specsFrom(args, scrapersDir);
+      const browser = await browserFor(specs);
       const results = [];
       for (const { spec } of specs) {
         results.push(
           await runCheck(spec, {
             ...htmlFrom(args.flags),
             historyRoot,
+            baselineFrom: fixturesDir,
             record: args.flags["record"] === true,
+            fetcher: browser,
           }),
         );
       }
@@ -258,12 +356,24 @@ async function main(): Promise<number> {
 
     case "repair": {
       const specs = specsFrom(args, scrapersDir);
+      const browser = await browserFor(specs);
+      const only = typeof args.flags["only"] === "string"
+        ? new Set(
+            args.flags["only"]
+              .split(",")
+              .map((t) => t.trim())
+              .filter(Boolean)
+              .map((t) => (t === "row" ? "__row__" : t)),
+          )
+        : null;
       let anyFixed = false;
       for (const { path, spec } of specs) {
         const outcome = await runRepair(spec, {
           fixturesRoot: fixturesDir,
           historyRoot,
+          baselineFrom: fixturesDir,
           model,
+          fetcher: browser,
           ...htmlFrom(args.flags),
         });
         if (asJson) {
@@ -296,8 +406,18 @@ async function main(): Promise<number> {
         if (outcome.fixes.length > 0) {
           anyFixed = true;
           if (args.flags["write"] === true) {
-            for (const fix of outcome.fixes) patchSpecFile(path, fix.target, fix.selector);
-            process.stdout.write(green(`wrote ${outcome.fixes.length} selector(s) to ${path}\n`));
+            const chosen = only ? outcome.fixes.filter((f) => only.has(f.target)) : outcome.fixes;
+            const held = outcome.fixes.filter((f) => !chosen.includes(f));
+            for (const fix of chosen) patchSpecFile(path, fix.target, fix.selector);
+            process.stdout.write(
+              chosen.length > 0
+                ? green(`wrote ${chosen.length} selector(s) to ${path}\n`)
+                : yellow(`nothing written: --only matched none of the verified fixes\n`),
+            );
+            for (const fix of held) {
+              const label = fix.target === "__row__" ? "row" : fix.target;
+              process.stdout.write(dim(`  held back ${label} (not in --only)\n`));
+            }
           }
           const bodyPath = args.flags["pr-body"];
           if (typeof bodyPath === "string") {
@@ -317,8 +437,12 @@ async function main(): Promise<number> {
 }
 
 main()
-  .then((code) => process.exit(code))
-  .catch((e: unknown) => {
+  .then(async (code) => {
+    await shutdown();
+    process.exit(code);
+  })
+  .catch(async (e: unknown) => {
+    await shutdown();
     const err = e as Error;
     process.stderr.write(red(`${err.name}: ${err.message}\n`));
     process.exit(2);
