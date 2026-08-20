@@ -1,0 +1,80 @@
+name: mender
+description: Check scrapers against their contracts, and open a pull request when a verified selector repair is available.
+branding:
+  icon: git-pull-request
+  color: green
+
+inputs:
+  command:
+    description: 'check | repair | drift'
+    required: false
+    default: check
+  scrapers:
+    description: Directory holding spec files.
+    required: false
+    default: scrapers
+  fixtures:
+    description: Directory holding golden snapshots.
+    required: false
+    default: fixtures
+  write:
+    description: On repair, persist verified selectors to the spec files.
+    required: false
+    default: 'false'
+  model:
+    description: Ask a model when the heuristics come up empty. Needs anthropic-api-key.
+    required: false
+    default: 'false'
+  anthropic-api-key:
+    description: API key used only when `model` is true.
+    required: false
+    default: ''
+  version:
+    description: Git ref of mender to run.
+    required: false
+    default: main
+
+outputs:
+  status:
+    description: 'ok | failing | repaired'
+    value: ${{ steps.run.outputs.status }}
+  report:
+    description: Path to the pull-request body written by a successful repair.
+    value: ${{ steps.run.outputs.report }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install mender
+      shell: bash
+      # Installed from the git ref rather than the registry: the package's
+      # `prepare` script builds dist on install, so this needs nothing published.
+      run: npm install --no-save "github:daronthedragon/mender#${{ inputs.version }}"
+
+    - name: Run mender
+      id: run
+      shell: bash
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        NO_COLOR: '1'
+      run: |
+        set +e
+        args=("${{ inputs.command }}" --scrapers "${{ inputs.scrapers }}" --fixtures "${{ inputs.fixtures }}")
+        [ "${{ inputs.write }}" = "true" ] && args+=(--write)
+        [ "${{ inputs.model }}" = "true" ] && args+=(--model)
+        [ "${{ inputs.command }}" = "repair" ] && args+=(--pr-body mender-report.md)
+
+        npx mender "${args[@]}"
+        code=$?
+
+        if [ "${{ inputs.command }}" = "repair" ] && [ -f mender-report.md ]; then
+          echo "status=repaired" >> "$GITHUB_OUTPUT"
+          echo "report=mender-report.md" >> "$GITHUB_OUTPUT"
+        elif [ $code -eq 0 ]; then
+          echo "status=ok" >> "$GITHUB_OUTPUT"
+          echo "report=" >> "$GITHUB_OUTPUT"
+        else
+          echo "status=failing" >> "$GITHUB_OUTPUT"
+          echo "report=" >> "$GITHUB_OUTPUT"
+        fi
+        exit $code

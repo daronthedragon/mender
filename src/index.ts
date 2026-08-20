@@ -1,3 +1,4 @@
+export * from "./api.js";
 export * from "./types.js";
 export * from "./html.js";
 export * from "./select.js";
@@ -10,6 +11,8 @@ export * from "./fixtures.js";
 export * from "./propose.js";
 export * from "./signature.js";
 export * from "./verify.js";
+export * from "./browser.js";
+export * from "./init.js";
 export * from "./llm.js";
 export * from "./history.js";
 export * from "./repair.js";

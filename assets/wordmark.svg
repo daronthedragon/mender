@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 460 128" width="460" height="128" role="img" aria-label="mender">
+  <title>mender</title>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <!-- the seam the break runs along -->
+    <path d="M64 16 V112" stroke="#94A3B8" stroke-width="2.5" stroke-dasharray="6 8" opacity="0.6"/>
+
+    <!-- left and right brackets, pulled apart by the break -->
+    <path d="M44 30 L16 64 L44 98" stroke="#14B8A6" stroke-width="12"/>
+    <path d="M84 30 L112 64 L84 98" stroke="#14B8A6" stroke-width="12"/>
+
+    <!-- sutures crossing the seam -->
+    <g stroke="#F59E0B" stroke-width="6.5">
+      <path d="M57 42 L71 50"/>
+      <path d="M57 60 L71 68"/>
+      <path d="M57 78 L71 86"/>
+    </g>
+  </g>
+  <text x="140" y="83"
+        font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace"
+        font-size="56" font-weight="600" letter-spacing="-2" fill="#14B8A6">mender</text>
+</svg>

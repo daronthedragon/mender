@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="mender">
+  <title>mender</title>
+  <!--
+    Two selector brackets split by a seam, stitched back together.
+    Brackets say "this is about markup"; the sutures say "it broke and it was
+    mended". The gap between the brackets is kept wide and the stitches narrow
+    so the mark still reads as < > at favicon size instead of a solid blob.
+    Colours hold up on both light and dark README backgrounds.
+  -->
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <!-- the seam the break runs along -->
+    <path d="M64 16 V112" stroke="#94A3B8" stroke-width="2.5" stroke-dasharray="6 8" opacity="0.6"/>
+
+    <!-- left and right brackets, pulled apart by the break -->
+    <path d="M44 30 L16 64 L44 98" stroke="#14B8A6" stroke-width="12"/>
+    <path d="M84 30 L112 64 L84 98" stroke="#14B8A6" stroke-width="12"/>
+
+    <!-- sutures crossing the seam -->
+    <g stroke="#F59E0B" stroke-width="6.5">
+      <path d="M57 42 L71 50"/>
+      <path d="M57 60 L71 68"/>
+      <path d="M57 78 L71 86"/>
+    </g>
+  </g>
+</svg>
