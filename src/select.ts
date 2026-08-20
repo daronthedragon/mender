@@ -3,7 +3,14 @@
  * tag / .class / #id / [attr op val] / * , the four combinators, :not(),
  * :first-child, :last-child and :nth-child(An+B).
  */
-import { type ElementNode, children, classList, descendants } from "./html.js";
+import {
+  type ElementNode,
+  childElementCount,
+  children,
+  classList,
+  descendants,
+  siblingIndex,
+} from "./html.js";
 
 type Simple =
   | { kind: "tag"; value: string }
@@ -174,19 +181,38 @@ function parseCompound(s: string, from: number): { simples: Simple[]; next: numb
 
 /* ---------- matching ---------- */
 
-function elementIndex(el: ElementNode): { index: number; total: number } {
-  const parent = el.parent;
-  if (!parent) return { index: 1, total: 1 };
-  const sibs = children(parent);
-  return { index: sibs.indexOf(el) + 1, total: sibs.length };
+/*
+ * Position among element siblings. The parser records both numbers, so this is
+ * a field read rather than the scan-and-indexOf it used to be — it sits in the
+ * innermost loop of every :nth-child and sibling-combinator match.
+ */
+function elementIndexOf(el: ElementNode): number {
+  return el.parent ? siblingIndex(el) + 1 : 1;
 }
 
+function elementTotal(el: ElementNode): number {
+  return el.parent ? childElementCount(el.parent) : 1;
+}
+
+const NTH_INT = /^[+-]?\d+$/;
+const NTH_AN_B = /^([+-]?\d*)n([+-]\d+)?$/;
+const NTH_WS = /\s+/g;
+const nthCache = new Map<string, { a: number; b: number } | null>();
+
 function parseNth(arg: string): { a: number; b: number } | null {
-  const s = arg.replace(/\s+/g, "").toLowerCase();
+  const cached = nthCache.get(arg);
+  if (cached !== undefined) return cached;
+  const parsed = parseNthUncached(arg);
+  nthCache.set(arg, parsed);
+  return parsed;
+}
+
+function parseNthUncached(arg: string): { a: number; b: number } | null {
+  const s = arg.replace(NTH_WS, "").toLowerCase();
   if (s === "odd") return { a: 2, b: 1 };
   if (s === "even") return { a: 2, b: 0 };
-  if (/^[+-]?\d+$/.test(s)) return { a: 0, b: parseInt(s, 10) };
-  const m = /^([+-]?\d*)n([+-]\d+)?$/.exec(s);
+  if (NTH_INT.test(s)) return { a: 0, b: parseInt(s, 10) };
+  const m = NTH_AN_B.exec(s);
   if (!m) return null;
   const rawA = m[1]!;
   const a = rawA === "" || rawA === "+" ? 1 : rawA === "-" ? -1 : parseInt(rawA, 10);
@@ -223,17 +249,14 @@ function matchesSimple(el: ElementNode, s: Simple): boolean {
     case "attr": return attrMatches(el, s);
     case "pseudo": {
       switch (s.name) {
-        case "first-child": return elementIndex(el).index === 1;
-        case "last-child": {
-          const { index, total } = elementIndex(el);
-          return index === total;
-        }
-        case "only-child": return elementIndex(el).total === 1;
+        case "first-child": return elementIndexOf(el) === 1;
+        case "last-child": return elementIndexOf(el) === elementTotal(el);
+        case "only-child": return elementTotal(el) === 1;
         case "nth-child": {
           if (!s.arg) return false;
           const nth = parseNth(s.arg);
           if (!nth) return false;
-          return nthMatches(elementIndex(el).index, nth.a, nth.b);
+          return nthMatches(elementIndexOf(el), nth.a, nth.b);
         }
         case "not": {
           if (!s.arg) return false;
@@ -281,7 +304,7 @@ function matchSequence(
   const parent = el.parent;
   if (!parent) return false;
   const sibs = children(parent);
-  const idx = sibs.indexOf(el);
+  const idx = siblingIndex(el);
   if (combinator === "+") {
     const s = sibs[idx - 1];
     return s ? matchSequence(s, seq, prev, boundary) : false;

@@ -12,11 +12,15 @@ import { pruneHistory } from "./history.js";
 import { type PageFetcher, playwrightFetcher } from "./browser.js";
 import { formatSpec, inferSpec } from "./init.js";
 import { fetchPage } from "./fetch.js";
+import { type Notifier, consoleNotifier, notifiersFrom } from "./notify.js";
+import { formatDuration, loadSettings, parseDuration } from "./settings.js";
+import { runCycle, summariseCycle, watch } from "./watch.js";
 import { dim, green, red, yellow } from "./color.js";
 
 const USAGE = `mender — scrapers that repair themselves
 
 usage:
+  mender watch                     supervise every scraper: check, repair, notify, repeat
   mender init <url> [name]         write a spec by inferring it from a live page
   mender check   [path]            run every scraper (or one spec file) against its contract
   mender extract <spec>            print the rows a spec currently produces, as JSON
@@ -111,11 +115,18 @@ function specsFrom(args: Args, scrapersDir: string): { path: string; spec: Retur
 
 async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2));
-  const scrapersDir = str(args.flags, "scrapers", "scrapers");
-  const fixturesDir = str(args.flags, "fixtures", "fixtures");
+
+  // A committed settings file beats a shell script full of flags, but an
+  // explicit flag still wins over it.
+  const settings = loadSettings(
+    typeof args.flags["config"] === "string" ? args.flags["config"] : undefined,
+  );
+
+  const scrapersDir = str(args.flags, "scrapers", settings.scrapers ?? "scrapers");
+  const fixturesDir = str(args.flags, "fixtures", settings.fixtures ?? "fixtures");
   const asJson = args.flags["json"] === true;
-  const historyRoot = str(args.flags, "history", fixturesDir);
-  const wantModel = args.flags["model"] === true;
+  const historyRoot = str(args.flags, "history", settings.history ?? fixturesDir);
+  const wantModel = args.flags["model"] === true || Boolean(settings.model);
 
   const model = wantModel ? anthropicClient() : null;
   if (wantModel && !model) {
@@ -138,6 +149,80 @@ async function main(): Promise<number> {
   };
 
   switch (args.command) {
+    case "watch": {
+      const once = args.flags["once"] === true;
+      const interval = args.flags["interval"]
+        ? parseDuration(String(args.flags["interval"]))
+        : (settings.interval ?? 900);
+      const concurrency = num(args.flags, "concurrency") ?? settings.concurrency ?? 4;
+      const heal =
+        args.flags["heal"] === true
+          ? true
+          : args.flags["heal"] === "write"
+            ? ("write" as const)
+            : (settings.heal ?? false);
+
+      const notifyConfig = settings.notify;
+      let notifiers: Notifier[] = [];
+      if (args.flags["no-notify"] !== true) {
+        try {
+          notifiers = notifiersFrom(notifyConfig);
+        } catch (e) {
+          process.stderr.write(red(`${(e as Error).message}\n`));
+          return 2;
+        }
+      }
+      if (notifiers.length === 0 && !asJson) notifiers = [consoleNotifier()];
+
+      const effective = {
+        ...settings,
+        scrapers: scrapersDir,
+        fixtures: fixturesDir,
+        ...(settings.history || args.flags["history"] ? { history: historyRoot } : {}),
+        interval,
+        concurrency,
+        heal,
+        model: wantModel,
+        record: args.flags["record"] === true || settings.record === true,
+      };
+
+      const say = asJson ? () => {} : (line: string) => process.stdout.write(line + "\n");
+      if (!asJson) {
+        process.stdout.write(
+          dim(
+            `watching ${scrapersDir} every ${formatDuration(interval)} · ` +
+              `heal=${heal || "off"} · concurrency=${concurrency} · ` +
+              `notify=${notifiers.map((n) => n.name).join(",") || "none"}\n`,
+          ),
+        );
+      }
+
+      const cycleOpts = {
+        settings: effective,
+        notifiers,
+        ...(args.flags["notify-always"] === true ? { alwaysNotify: true } : {}),
+        onLine: say,
+      };
+
+      if (once) {
+        const report = await runCycle(cycleOpts);
+        if (asJson) {
+          process.stdout.write(JSON.stringify(report, null, 2) + "\n");
+        } else {
+          process.stdout.write(`${summariseCycle(report)}\n`);
+        }
+        return report.broken > 0 ? 1 : 0;
+      }
+
+      const cycles = num(args.flags, "cycles");
+      const reports = await watch({
+        ...cycleOpts,
+        ...(cycles !== null ? { maxCycles: cycles } : {}),
+      });
+      const last = reports[reports.length - 1];
+      return last && last.broken > 0 ? 1 : 0;
+    }
+
     case "init": {
       const url = args.positional[0];
       if (!url) throw new ConfigError("usage: mender init <url> [name]");

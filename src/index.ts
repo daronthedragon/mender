@@ -16,4 +16,7 @@ export * from "./init.js";
 export * from "./llm.js";
 export * from "./history.js";
 export * from "./repair.js";
+export * from "./notify.js";
+export * from "./settings.js";
+export * from "./watch.js";
 export * from "./report.js";
