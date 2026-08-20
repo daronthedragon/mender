@@ -144,7 +144,13 @@ export function loadSpecs(dir: string): { path: string; spec: ScraperSpec }[] {
   try {
     entries = readdirSync(dir);
   } catch {
-    throw new ConfigError(`no scraper directory at ${dir}`);
+    throw new ConfigError(
+      [
+        `no scraper directory at ${dir}`,
+        "  mender init <url>   creates one from a live page",
+        "  mender demo         runs the whole pipeline offline, with nothing to set up",
+      ].join("\n"),
+    );
   }
 
   const out: { path: string; spec: ScraperSpec }[] = [];
@@ -169,7 +175,11 @@ export function loadSpecs(dir: string): { path: string; spec: ScraperSpec }[] {
   if (out.length === 0) {
     const aside = skipped.length > 0 ? ` (${skipped.length} json file(s) there are not specs)` : "";
     throw new ConfigError(
-      `no scraper specs found in ${dir}${aside} — create one with: mender init <url>`,
+      [
+        `no scraper specs found in ${dir}${aside}`,
+        "  mender init <url>   creates one from a live page",
+        "  mender demo         runs the whole pipeline offline, with nothing to set up",
+      ].join("\n"),
     );
   }
   return out;

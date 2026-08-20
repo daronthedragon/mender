@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { ConfigError, loadSpec, loadSpecs, patchSpecFile } from "./config.js";
 import { runCheck, runRepair } from "./repair.js";
 import { prBody, prTitle, renderCheck, renderRepair } from "./report.js";
@@ -16,11 +17,13 @@ import { type Notifier, consoleNotifier, notifiersFrom } from "./notify.js";
 import { formatDuration, loadSettings, parseDuration } from "./settings.js";
 import { runCycle, summariseCycle, watch } from "./watch.js";
 import { doctor } from "./doctor.js";
+import { runDemo } from "./demo.js";
 import { dim, green, red, yellow } from "./color.js";
 
 const USAGE = `mender — scrapers that repair themselves
 
 usage:
+  mender demo                      run the whole pipeline offline against bundled pages
   mender watch                     supervise every scraper: check, repair, notify, repeat
   mender init <url> [name]         write a spec by inferring it from a live page
   mender check   [path]            run every scraper (or one spec file) against its contract
@@ -50,6 +53,76 @@ options:
   --only <targets>   repair --write: apply only these targets (comma separated, "row" for the row selector)
   --render           init: load the page in a browser first (needs playwright)
 `;
+
+/** Read from package.json so it can never drift from the released version. */
+const VERSION: string = (() => {
+  try {
+    const here = fileURLToPath(import.meta.url);
+    const pkg = JSON.parse(readFileSync(join(dirname(dirname(here)), "package.json"), "utf8"));
+    return `mender ${pkg.version}`;
+  } catch {
+    return "mender (version unknown)";
+  }
+})();
+
+const HELP: Record<string, string> = {
+  watch: `mender watch — supervise every scraper: check, repair, notify, repeat
+
+  --once             run one cycle and exit, for an existing cron
+  --interval <dur>   time between cycles: 30s / 15m / 2h        (default 15m)
+  --cycles <n>       stop after n cycles
+  --concurrency <n>  scrapers to run at once                     (default 4)
+  --heal [write]     repair automatically; "write" also persists to the spec
+  --no-notify        never send, whatever the config says
+  --notify-always    send every cycle instead of only on change
+  --config <file>    settings file                (default mender.config.json)
+
+Notifications fire on CHANGE, not every cycle: the same break is reported once,
+a second field breaking is a new incident, and recovery closes the loop.
+`,
+  repair: `mender repair <spec> — diagnose, propose a fix, verify it, show the diff
+
+  --write            apply the verified fix to the spec file
+  --only <targets>   with --write: apply only these ("row" for the row selector)
+  --pr-body <file>   write a pull-request body to this path
+  --model            ask a model when the heuristics come up empty
+  --provider <name>  anthropic | openai | gemini | ollama   (default: inferred)
+  --model-name <id>  model id, e.g. gpt-4o-mini, llama3.1
+  --base-url <url>   any OpenAI-compatible endpoint, or a local server
+  --html <file>      use a local file instead of fetching
+
+Every proposal must clear four gates — live, archive, coverage, continuity —
+whoever proposed it. When none can be proved, nothing changes and it tells you
+what it rejected and why.
+`,
+  init: `mender init <url> [name] — write a spec by inferring it from a live page
+
+  --render           load the page in a browser first (needs playwright)
+  --html <file>      infer from a local file instead of fetching
+  --force            overwrite an existing spec
+
+Finds the repeating record, proposes fields, infers types, names them from the
+markup, proves the result passes, and archives the page as the first reference.
+`,
+  fixture: `mender fixture <spec> — archive today's page as a golden snapshot
+
+  --force            archive even if the contract does not pass
+  --prune            retire snapshots that have stopped being useful
+  --max-age-days <n> with --prune: age limit for failing snapshots (default 180)
+  --keep <n>         with --prune: how many to keep                (default 10)
+
+Fixtures are the regression gate: a repair must keep extracting identical data
+from every one of them. Without at least one, repair refuses to run.
+`,
+  drift: `mender drift [path] — report meaning-level drift against run history
+
+  --record           append this run to the history file
+  --median-shift <n> relative median change that counts as drift   (default .15)
+  --row-shift <n>    relative row-count change that counts          (default .5)
+
+Drift is a warning for a human, never a trigger for a repair.
+`,
+};
 
 /**
  * The browser is built lazily and only if something actually asks for it, so an
@@ -152,8 +225,15 @@ async function main(): Promise<number> {
     );
   }
 
+  if (args.flags["version"] === true || args.command === "version" || args.command === "-v") {
+    process.stdout.write(`${VERSION}\n`);
+    return 0;
+  }
+
   if (!args.command || args.command === "help" || args.flags["help"]) {
-    process.stdout.write(USAGE);
+    // `mender watch --help` should describe watch, not print the whole manual.
+    const topic = args.command === "help" ? args.positional[0] : args.command;
+    process.stdout.write(topic && HELP[topic] ? HELP[topic] : USAGE);
     return 0;
   }
 
@@ -166,6 +246,11 @@ async function main(): Promise<number> {
   };
 
   switch (args.command) {
+    case "demo": {
+      const result = await runDemo();
+      return result.failed === 0 ? 0 : 1;
+    }
+
     case "doctor": {
       const report = doctor({ scrapersDir, fixturesRoot: fixturesDir, historyRoot, settings });
       if (asJson) {

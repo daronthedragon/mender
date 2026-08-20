@@ -1,6 +1,6 @@
 {
-  "name": "@daronthedragon/mender",
-  "version": "1.2.0",
+  "name": "mender",
+  "version": "1.3.0",
   "description": "Scrapers that repair themselves. Diagnoses why extraction broke, refuses to touch selectors when the page was blocked, proposes a fix with heuristics then a model, and proves it against every archived snapshot before opening a PR.",
   "type": "module",
   "bin": {
@@ -11,8 +11,7 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "test": "npm run build && node test/run.mjs",
-    "prepare": "tsc",
-    "prepublishOnly": "npm run build && node test/run.mjs"
+    "prepare": "tsc"
   },
   "engines": {
     "node": ">=20"
@@ -52,8 +51,10 @@
   "files": [
     "dist",
     "src",
+    "examples",
     "assets/logo.svg",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "repository": {
@@ -65,8 +66,5 @@
     "url": "https://github.com/daronthedragon/mender/issues"
   },
   "author": "Daron",
-  "sideEffects": false,
-  "publishConfig": {
-    "access": "public"
-  }
+  "sideEffects": false
 }
