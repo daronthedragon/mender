@@ -59,3 +59,24 @@ jobs:
         run: |
           echo "outcome=${{ steps.empty.outcome }} status=${{ steps.empty.outputs.status }}"
           test "${{ steps.empty.outcome }}" = "failure"
+
+  pinning:
+    # `./` cannot verify the version fix: a local action has no action_ref, so
+    # it always takes the fallback. Referencing the repo by SHA exercises the
+    # path a Marketplace consumer actually uses when they pin a version.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run the action pinned to this commit
+        id: pinned
+        uses: daronthedragon/mender@9d675b8106db26226d5a7eab52526be70e92aa2c
+        continue-on-error: true
+        with:
+          command: demo
+
+      - name: It must install the pinned ref, not main
+        run: echo "outcome=${{ steps.pinned.outcome }}"
