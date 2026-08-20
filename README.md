@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/daronthedragon/mender/actions/workflows/test.yml"><img src="https://github.com/daronthedragon/mender/actions/workflows/test.yml/badge.svg" alt="tests"></a>
   <img src="https://img.shields.io/badge/dependencies-0-14B8A6" alt="zero dependencies">
-  <img src="https://img.shields.io/badge/tests-567-14B8A6" alt="567 tests">
+  <img src="https://img.shields.io/badge/tests-587-14B8A6" alt="587 tests">
   <img src="https://img.shields.io/badge/node-%E2%89%A520-334155" alt="node >= 20">
   <img src="https://img.shields.io/badge/license-MIT-334155" alt="MIT">
 </p>
@@ -47,7 +47,7 @@ cause: OK
 
 ## Contents
 
-- [Install](#install) · [Five-minute tour](#five-minute-tour)
+- [Install](#install) · [See it work](#see-it-work-before-configuring-anything) · [Five-minute tour](#five-minute-tour)
 - [The idea](#the-idea) — [contracts](#1-a-contract-not-a-selector), [causes](#2-the-cause-classifier-is-the-safety-feature), [unions](#3-repairs-are-unions-not-overwrites), [gates](#4-four-gates)
 - [Watch mode](#watch-mode) · [Notifications](#notifications)
 - [The model](#the-model-is-optional-and-never-in-the-hot-path) · [Drift](#semantic-drift)
@@ -61,13 +61,46 @@ cause: OK
 
 ## Install
 
+Straight from git — there is no registry step, and none is needed.
+
 ```bash
-npm install github:daronthedragon/mender
+npx github:daronthedragon/mender demo        # try it with nothing installed
 ```
 
-Published on npm as **`@daronthedragon/mender`** (the unscoped name was already taken by an unrelated package). Installing from the git URL works today either way — the package's `prepare` script builds it on install.
+```bash
+npm install github:daronthedragon/mender     # as a dependency
+npm install github:daronthedragon/mender#v1.3.0   # pinned to a release
+```
 
-Zero runtime dependencies. Node ≥ 20. Playwright is optional and only needed for client-rendered pages.
+```bash
+git clone https://github.com/daronthedragon/mender && cd mender
+npm install && npm run build && npm test     # to hack on it
+```
+
+All three are verified in CI-adjacent checks: the tag pin resolves, `--omit=dev` still produces a working `dist` (npm installs the package's own build dependencies to run `prepare`, then prunes them), and `npx` runs with nothing installed at all.
+
+Zero runtime dependencies. Node ≥ 20. Playwright is optional, and only for client-rendered pages.
+
+## See it work before configuring anything
+
+```bash
+mender demo
+```
+
+Runs the real pipeline against bundled example pages — **no network, no config, no API key** — through every scenario, including the two where the correct behaviour is to refuse:
+
+```
+0. The scraper as it was written                     OK — 3 rows, contract satisfied
+1. A field moves to new markup                       repaired  .amount → .amount, [data-testid="price-value"]
+2. The record container is renamed                   repaired  .pricing-card → .pricing-card, .plan-card
+3. Records are regrouped, two to a wrapper           repaired  → .pair > article, recovering all 4 records
+4. The field is gone, something else looks like it   refused   rejected at continuity, median moved 90%
+5. The site is blocking us                           refused   selectors left untouched
+
+all 5 scenarios behaved as documented
+```
+
+The demo is also a test: `test/demo.test.mjs` asserts each scenario still behaves as this README claims, so a scenario that silently stopped working fails the build rather than misleading a reader.
 
 ## Five-minute tour
 
@@ -481,7 +514,7 @@ watch options:
 ## Library reference
 
 ```ts
-import { scrape, rows, scrapeAll, defineSpec, MenderError } from "@daronthedragon/mender";
+import { scrape, rows, scrapeAll, defineSpec, MenderError } from "mender";
 ```
 
 ### `scrape(specOrPath, options) → ScrapeResult`
@@ -600,7 +633,7 @@ A ready-made scheduled workflow is in [`.github/workflows/scrape.yml`](.github/w
 **Guard an existing pipeline** — fail loudly rather than write bad data:
 
 ```js
-import { rows, MenderError } from "@daronthedragon/mender";
+import { rows, MenderError } from "mender";
 try {
   await db.upsert(await rows("scrapers/pricing.json", { heal: true }));
 } catch (e) {
@@ -728,7 +761,7 @@ Named honestly, because a self-healing tool that overstates itself is the worst 
 
 ## Tests
 
-567 assertions. No network beyond servers the suite starts itself, and no API key — the model path runs through an injected fake client. The browser suite adapts to whether Playwright is present rather than skipping silently, so CI (which has no Playwright) reports a slightly lower count.
+587 assertions. No network beyond servers the suite starts itself, and no API key — the model path runs through an injected fake client. The browser suite adapts to whether Playwright is present rather than skipping silently, so CI (which has no Playwright) reports a slightly lower count.
 
 ```bash
 npm test

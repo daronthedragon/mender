@@ -3,6 +3,43 @@
 All notable changes to this project are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] — 2026-08-20
+
+### Changed — git is the install path, and npm is not involved
+
+The package is `mender` again rather than a scope that only existed to dodge a
+registry name collision, and the npm publish workflow is gone. Nothing is lost:
+a tag pin, a production install and `npx` with nothing installed were all
+checked and all work.
+
+```bash
+npx github:daronthedragon/mender demo             # nothing installed
+npm install github:daronthedragon/mender          # as a dependency
+npm install github:daronthedragon/mender#v1.3.0   # pinned to a release
+```
+
+`examples/` is now packed with the release, so a git install carries the demo.
+
+### Added — `mender demo`
+
+A fresh clone had nothing to point at: no scrapers, no fixtures, and a first
+command that failed with `no scraper directory at scrapers`. `mender demo` runs
+the real pipeline against the bundled pages with no network, no config and no
+API key, through every scenario including the two where refusing is correct.
+
+It doubles as a test. `test/demo.test.mjs` asserts each scenario still behaves
+as the README claims, so a scenario that silently stops working fails the build
+rather than misleading a reader.
+
+### Added — the CLI basics that were missing
+
+- `--version` and `-v` printed the whole manual and `unknown command` before.
+- Per-command help: `mender watch --help` describes watch, not everything.
+- A missing or empty scrapers directory now names the two ways forward
+  (`mender init <url>`, `mender demo`) instead of just stating the error.
+
+587 assertions, up from 567.
+
 ## [1.2.0] — 2026-08-20
 
 ### Added — the model proposer is no longer Claude-only
