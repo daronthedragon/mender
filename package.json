@@ -1,0 +1,18 @@
+{
+  "name": "mender",
+  "version": "0.1.0",
+  "description": "Scrapers that repair themselves. Detects why extraction broke, refuses to touch selectors when the page was blocked, proposes a fix, and proves it against every archived snapshot before opening a PR.",
+  "type": "module",
+  "bin": { "mender": "dist/cli.js" },
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "npm run build && node test/run.mjs"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {},
+  "devDependencies": { "typescript": "^5.7.0", "@types/node": "^22.10.0" },
+  "keywords": ["scraping", "self-healing", "css-selector", "agent", "monitoring"],
+  "license": "MIT"
+}

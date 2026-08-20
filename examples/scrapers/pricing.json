@@ -1,0 +1,11 @@
+{
+  "name": "pricing",
+  "url": "https://example.com/pricing",
+  "row": ".pricing-card",
+  "fields": {
+    "plan": { "selector": ".plan-title", "type": "string" },
+    "price": { "selector": ".amount", "type": "number", "min": 1 },
+    "features": { "selector": "li", "type": "list", "minItems": 3 }
+  },
+  "expect": { "rows": { "min": 2, "max": 8 } }
+}

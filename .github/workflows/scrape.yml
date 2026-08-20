@@ -1,0 +1,47 @@
+# Run the scrapers on a schedule. A layout change opens a pull request with a
+# verified selector fix; anything else fails loudly and changes nothing.
+name: scrape
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci && npm run build
+
+      - name: Check contracts
+        id: check
+        run: node dist/cli.js check
+        continue-on-error: true
+
+      - name: Attempt repair
+        if: steps.check.outcome == 'failure'
+        id: repair
+        run: node dist/cli.js repair --write --pr-body pr-body.md
+        continue-on-error: true
+
+      - name: Open a pull request
+        if: steps.repair.outcome == 'success'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: mender/selector-repair
+          title: "fix: repair scraper selectors"
+          body-path: pr-body.md
+          commit-message: "fix: repair scraper selectors"
+
+      - name: Fail if still broken
+        if: steps.check.outcome == 'failure' && steps.repair.outcome != 'success'
+        run: |
+          echo "Scrapers are failing and mender did not accept a repair." >&2
+          node dist/cli.js check
