@@ -1,0 +1,61 @@
+# Runs the composite action against itself.
+#
+# An action that has never executed should not be published, and this repo's
+# other workflows call the CLI directly rather than the action — so until this
+# existed, action.yml was untested code with a Marketplace banner over it.
+name: action
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - action.yml
+      - .github/workflows/action-selftest.yml
+      - src/**
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  demo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # `./` runs the action from this checkout, so the workflow tests the
+      # action.yml in the commit rather than whatever main happens to hold.
+      - name: Run the bundled demo through the action
+        id: demo
+        uses: ./
+        with:
+          command: demo
+
+      - name: The action must report its status
+        run: |
+          echo "status=${{ steps.demo.outputs.status }}"
+          test "${{ steps.demo.outputs.status }}" = "ok"
+
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # A directory with no specs must fail cleanly with a usable message,
+      # not crash the runner.
+      - name: An empty project fails cleanly
+        id: empty
+        continue-on-error: true
+        uses: ./
+        with:
+          command: check
+          scrapers: does-not-exist
+
+      - name: And reports failing rather than succeeding silently
+        run: |
+          echo "outcome=${{ steps.empty.outcome }} status=${{ steps.empty.outputs.status }}"
+          test "${{ steps.empty.outcome }}" = "failure"
