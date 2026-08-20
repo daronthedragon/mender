@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/daronthedragon/mender/actions/workflows/test.yml"><img src="https://github.com/daronthedragon/mender/actions/workflows/test.yml/badge.svg" alt="tests"></a>
   <img src="https://img.shields.io/badge/dependencies-0-14B8A6" alt="zero dependencies">
-  <img src="https://img.shields.io/badge/tests-587-14B8A6" alt="587 tests">
+  <img src="https://img.shields.io/badge/tests-631-14B8A6" alt="631 tests">
   <img src="https://img.shields.io/badge/node-%E2%89%A520-334155" alt="node >= 20">
   <img src="https://img.shields.io/badge/license-MIT-334155" alt="MIT">
 </p>
@@ -51,7 +51,7 @@ cause: OK
 - [The idea](#the-idea) — [contracts](#1-a-contract-not-a-selector), [causes](#2-the-cause-classifier-is-the-safety-feature), [unions](#3-repairs-are-unions-not-overwrites), [gates](#4-four-gates)
 - [Watch mode](#watch-mode) · [Notifications](#notifications)
 - [The model](#the-model-is-optional-and-never-in-the-hot-path) · [Drift](#semantic-drift)
-- [Rendering, pagination, auth](#rendering-pagination-and-auth) · [Fixtures](#fixtures)
+- [Rendering, pagination, auth](#rendering-pagination-and-auth) · [Politeness](#politeness) · [Fixtures](#fixtures)
 - [Doctor](#doctor)
 - **Reference**: [spec](#spec-reference) · [config](#config-reference) · [CLI](#cli-reference) · [library](#library-reference)
 - [CI](#continuous-integration) · [Recipes](#recipes) · [Architecture](#architecture)
@@ -188,6 +188,7 @@ Most contract failures are **not** layout changes. If you repair selectors again
 | `OK` | Contract satisfied. | — |
 | `LAYOUT_CHANGE` | Page served normally, data wrong. | **yes, only this** |
 | `BLOCKED` | Challenge page, 403, 429, captcha markers. | no |
+| `DISALLOWED` | robots.txt forbids the path. The request is never sent. | no |
 | `HTTP_ERROR` | 4xx/5xx, or status `0` for a transport failure. | no |
 | `REDIRECTED` | Final URL is a different path. | no |
 | `EMPTY` | No rows, almost no text, almost no structure. | no |
@@ -388,6 +389,35 @@ npm install playwright && npx playwright install chromium
 **Auth** names environment variables; specs never hold secrets, and config *rejects* a value that looks like a literal token. Credentials are sent on every paginated page. A missing variable is `HTTP_ERROR` naming the variable, never a layout change — repairing selectors against a login page is exactly what this tool exists to prevent.
 
 Both transports run through one code path, so pagination, auth, loop guards and failure semantics are identical, and a failed render is status `0` like any transport failure.
+
+## Politeness
+
+`BLOCKED` is the one cause mender can never repair — when a site decides you are a nuisance, no selector fix helps. Everything else here recovers from failure; this is the only part that prevents one.
+
+Before this existed, a spec with `maxPages: 10` fired ten requests as fast as the socket allowed, `watch` ran four scrapers at once against what might be the same host, and robots.txt was never fetched at all.
+
+```json
+"politeness": {
+  "respectRobots": true,
+  "minDelayMs": 1000,
+  "maxDelayMs": 30000,
+  "userAgent": "mender"
+}
+```
+
+**robots.txt is fetched, parsed and obeyed** — per-agent groups (a group naming you beats `*`), `Allow` carving exceptions out of a broader `Disallow` by longest match, `*` wildcards and `$` anchors, and consecutive `User-agent:` lines sharing the group that follows them. A disallowed path becomes `DISALLOWED` and **the request is never sent**; there is a test asserting the server never sees it.
+
+**Rate limiting is per host and shared across the run**, so four scrapers pointed at one host queue behind each other rather than turning concurrency into a burst. A site's own `Crawl-delay` is honoured above your floor, and capped by `maxDelayMs` so a hostile robots.txt cannot stall a run for ten minutes.
+
+A robots.txt that is unreachable or returns 5xx is treated as **absent, not as a blanket ban** — a site's own outage should not take every scraper down with it.
+
+```
+$ mender doctor
+ok   politeness     robots.txt is respected
+ok   politeness     1000ms between requests; shop.example.com has 3 scrapers sharing that queue
+```
+
+Set `"respectRobots": false` if you own the sites; `doctor` will warn that nothing is checking any more.
 
 ## Fixtures
 
@@ -757,11 +787,11 @@ Named honestly, because a self-healing tool that overstates itself is the worst 
 - **Drift from a thin baseline is noisy** — hence `provisional`.
 - **No JS interaction.** The browser renders and waits; it doesn't click, scroll or fill forms, so content behind "load more" is out of reach.
 - **Cross-field relationships are only checked structurally.** Coverage catches records being carved up wrongly, but a change that keeps every field plausible *and* every record reachable while pairing them differently — prices shifted one row up within the same rows — would still pass.
-- **No proxy rotation or anti-bot evasion**, deliberately. `BLOCKED` means back off.
+- **No proxy rotation or anti-bot evasion**, deliberately. `BLOCKED` means back off, and robots.txt is obeyed rather than worked around.
 
 ## Tests
 
-587 assertions. No network beyond servers the suite starts itself, and no API key — the model path runs through an injected fake client. The browser suite adapts to whether Playwright is present rather than skipping silently, so CI (which has no Playwright) reports a slightly lower count.
+631 assertions. No network beyond servers the suite starts itself, and no API key — the model path runs through an injected fake client. The browser suite adapts to whether Playwright is present rather than skipping silently, so CI (which has no Playwright) reports a slightly lower count.
 
 ```bash
 npm test

@@ -3,6 +3,41 @@
 All notable changes to this project are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] — 2026-08-20
+
+### Added — politeness, the only failure this tool can prevent
+
+`BLOCKED` is the one cause mender can never repair: when a site decides you are
+a nuisance, no selector fix helps. Everything else in the project recovers from
+failure. This is the only part that stops one happening.
+
+Nothing prevented it before. A spec with `maxPages: 10` fired ten requests as
+fast as the socket allowed, `watch` ran four scrapers at once against what may
+be the same host, and robots.txt was never fetched at all.
+
+- **robots.txt** is fetched once per origin, cached, parsed and obeyed:
+  per-agent groups (a group naming you beats `*`), `Allow` carving exceptions
+  out of a broader `Disallow` by longest match, `*` wildcards and `$` anchors,
+  and consecutive `User-agent:` lines sharing the group that follows them.
+- **`DISALLOWED`** is a new cause. The request is never sent — a test asserts
+  the server never sees it — and like every non-layout cause it can never
+  trigger a repair.
+- **Per-host rate limiting shared across a run**, so concurrency stops turning
+  into a burst. The slot is claimed before awaiting, so simultaneous callers
+  queue instead of all reading the same free moment and firing together.
+- **`Crawl-delay` is honoured** above your floor and capped by `maxDelayMs`, so
+  a hostile or mistaken robots.txt cannot stall a run for ten minutes.
+- An unreachable robots.txt, or one returning 5xx, is treated as **absent, not
+  as a blanket ban** — a site's own outage should not take every scraper down.
+- `mender doctor` reports the effective delay and names the host with the most
+  scrapers sharing that queue.
+
+The throttling claim is measured rather than configured: a test drives four
+paginated requests at a real server, records arrival timestamps and asserts no
+two arrived closer than the configured delay.
+
+631 assertions, up from 587.
+
 ## [1.3.0] — 2026-08-20
 
 ### Changed — git is the install path, and npm is not involved

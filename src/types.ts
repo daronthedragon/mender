@@ -71,6 +71,7 @@ export type Cause =
   | "HTTP_ERROR"
   | "REDIRECTED"
   | "BLOCKED"
+  | "DISALLOWED"
   | "EMPTY"
   | "LAYOUT_CHANGE";
 

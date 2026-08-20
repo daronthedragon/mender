@@ -7,6 +7,7 @@ const CAUSE_COLOR: Record<Cause, (s: string) => string> = {
   OK: green,
   LAYOUT_CHANGE: yellow,
   BLOCKED: red,
+  DISALLOWED: red,
   HTTP_ERROR: red,
   REDIRECTED: red,
   EMPTY: red,

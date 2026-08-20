@@ -1,6 +1,7 @@
 import { parse } from "./html.js";
 import { querySelector } from "./select.js";
 import type { PageFetcher } from "./browser.js";
+import type { Politeness } from "./politeness.js";
 import type { AuthSpec, FetchResult, FetchedPages, ScraperSpec } from "./types.js";
 
 const DEFAULT_UA =
@@ -14,9 +15,14 @@ export interface FetchOptions {
   /** Render through a browser instead of plain fetch. Supplied by the caller so
    *  the heavy dependency is never reached for a server-rendered page. */
   fetcher?: PageFetcher | null;
+  /** robots.txt and per-host rate limiting. Absent means neither is applied. */
+  politeness?: Politeness | null;
 }
 
 export class AuthError extends Error {}
+
+/** robots.txt forbids this url. Never a repairable condition. */
+export class DisallowedError extends Error {}
 
 /**
  * Resolve the named environment variables into real headers. A spec never holds
@@ -109,8 +115,14 @@ export async function fetchPages(spec: ScraperSpec, opts: FetchOptions = {}): Pr
 
   // One entry point for both transports, so pagination, auth, loop guards and
   // failure semantics are identical whether or not a browser is involved.
-  const get = (url: string): Promise<FetchResult> =>
-    opts.fetcher
+  const get = async (url: string): Promise<FetchResult> => {
+    // One gate for both transports: robots first, then the host's rate limit.
+    if (opts.politeness) {
+      const verdict = await opts.politeness.check(url);
+      if (!verdict.allowed) throw new DisallowedError(verdict.reason);
+      await opts.politeness.wait(url);
+    }
+    return opts.fetcher
       ? opts.fetcher.fetch(url, {
           ...(spec.render?.waitFor ? { waitFor: spec.render.waitFor } : {}),
           ...(spec.render?.waitMs ? { waitMs: spec.render.waitMs } : {}),
@@ -119,6 +131,7 @@ export async function fetchPages(spec: ScraperSpec, opts: FetchOptions = {}): Pr
           headers,
         })
       : fetchPage(url, withAuth);
+  };
 
   const paginate = spec.paginate;
   if (!paginate || paginate.maxPages <= 1) {

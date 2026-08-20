@@ -3,6 +3,7 @@ import { runCheck, runRepair } from "./repair.js";
 import { type PageFetcher, playwrightFetcher } from "./browser.js";
 import type { ModelClient } from "./llm.js";
 import { type ModelConfig, createModelClient } from "./providers.js";
+import { Politeness, type PolitenessConfig } from "./politeness.js";
 import { saveFixture, todayStamp } from "./fixtures.js";
 import { ROW_TARGET } from "./propose.js";
 import type { DriftFinding } from "./history.js";
@@ -35,6 +36,11 @@ export interface ScrapeOptions {
   model?: ModelClient | ModelConfig | boolean | null;
   /** Render with a browser. Also implied by a spec with a `render` block. */
   render?: boolean;
+  /**
+   * robots.txt and per-host rate limiting. Defaults to on. Pass a shared
+   * `Politeness` when scraping many specs so one host sees one queue.
+   */
+  politeness?: Politeness | PolitenessConfig | false;
   /** Use this HTML instead of fetching. */
   html?: string;
   timeoutMs?: number;
@@ -131,6 +137,11 @@ export async function scrape(
       ...(opts.html !== undefined ? { html: opts.html } : {}),
       ...(opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}),
       ...(fetcher ? { fetcher } : {}),
+      // Off only when explicitly disabled, or when reading a local file, where
+      // there is no host to be polite to.
+      ...(opts.politeness === false || opts.html !== undefined
+        ? {}
+        : { politeness: opts.politeness ?? {} }),
     };
 
     const check = await runCheck(spec, runOptions);

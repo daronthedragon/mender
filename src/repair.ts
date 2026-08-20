@@ -2,7 +2,8 @@ import { type ElementNode, parse } from "./html.js";
 import { classify, shouldRepair } from "./classify.js";
 import { brokenFields, rowCountBroken, validate } from "./contract.js";
 import { type ExtractedRow, extract, toRows } from "./extract.js";
-import { AuthError, fetchPages } from "./fetch.js";
+import { AuthError, DisallowedError, fetchPages } from "./fetch.js";
+import { Politeness, type PolitenessConfig } from "./politeness.js";
 import type { PageFetcher } from "./browser.js";
 import { type LoadedFixture, loadFixtures } from "./fixtures.js";
 import {
@@ -32,6 +33,8 @@ export interface RunOptions {
   baselineFrom?: string;
   /** Render through a browser. Supplied by the caller; absent means plain fetch. */
   fetcher?: PageFetcher | null;
+  /** robots.txt and per-host rate limiting. Share one across a whole run. */
+  politeness?: Politeness | PolitenessConfig | null;
   now?: Date;
 }
 
@@ -74,15 +77,38 @@ export async function runCheck(spec: ScraperSpec, opts: RunOptions = {}): Promis
     pages = [primary];
   } else {
     try {
+      const politeness =
+        opts.politeness instanceof Politeness
+          ? opts.politeness
+          : opts.politeness
+            ? new Politeness(opts.politeness)
+            : null;
+
       const fetched = await fetchPages(spec, {
         ...(opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}),
         ...(opts.fetcher ? { fetcher: opts.fetcher } : {}),
+        ...(politeness ? { politeness } : {}),
       });
       primary = fetched.primary;
       pages = fetched.pages;
     } catch (e) {
       // A misconfigured credential must be loud and must never look like a
       // layout change, so it is reported as an error cause rather than thrown.
+      // robots.txt is a different answer from a broken page, and must never be
+      // mistaken for one: no repair, and the reason says so plainly.
+      if (e instanceof DisallowedError) {
+        const blocked = { status: 0, finalUrl: spec.url, html: "", ms: 0 };
+        return {
+          spec,
+          fetched: blocked,
+          pages: [blocked],
+          rows: [],
+          violations: [],
+          cause: "DISALLOWED" as const,
+          causeDetail: e.message,
+          drift: [],
+        };
+      }
       const detail = e instanceof AuthError ? e.message : `fetch failed: ${(e as Error).message}`;
       primary = { status: 0, finalUrl: spec.url, html: `<!-- ${detail} -->`, ms: 0 };
       return {

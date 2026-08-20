@@ -200,6 +200,54 @@ function modelFindings(settings: MenderSettings, env: NodeJS.ProcessEnv): Findin
   ];
 }
 
+function politenessFindings(settings: MenderSettings, specs: ScraperSpec[]): Finding[] {
+  const cfg = settings.politeness ?? {};
+  const out: Finding[] = [];
+
+  if (cfg.respectRobots === false) {
+    out.push({
+      severity: "warn",
+      scope: "politeness",
+      message: "robots.txt is disabled, so nothing checks whether these pages may be fetched",
+      fix: 'remove "respectRobots": false unless you own the sites',
+    });
+  } else {
+    out.push({ severity: "ok", scope: "politeness", message: "robots.txt is respected" });
+  }
+
+  const delay = cfg.minDelayMs ?? 1000;
+  // Several specs on one host share a queue, so the real interval a host sees
+  // is what matters, not the per-spec setting.
+  const byHost = new Map<string, number>();
+  for (const spec of specs) {
+    try {
+      const host = new URL(spec.url).host;
+      byHost.set(host, (byHost.get(host) ?? 0) + 1);
+    } catch {
+      // an invalid url is already reported by spec validation
+    }
+  }
+  const busiest = [...byHost.entries()].sort((a, b) => b[1] - a[1])[0];
+
+  if (delay === 0) {
+    out.push({
+      severity: "warn",
+      scope: "politeness",
+      message: "minDelayMs is 0, so requests to a host go out as fast as the loop can issue them",
+      fix: 'set "politeness": { "minDelayMs": 1000 }',
+    });
+  } else if (busiest && busiest[1] > 1) {
+    out.push({
+      severity: "ok",
+      scope: "politeness",
+      message: `${delay}ms between requests; ${busiest[0]} has ${busiest[1]} scrapers sharing that queue`,
+    });
+  } else {
+    out.push({ severity: "ok", scope: "politeness", message: `${delay}ms between requests per host` });
+  }
+  return out;
+}
+
 export interface DoctorOptions {
   scrapersDir: string;
   fixturesRoot: string;
@@ -248,6 +296,7 @@ export function doctor(opts: DoctorOptions): DoctorReport {
   findings.push(...renderFindings(list));
   findings.push(...notifyFindings(opts.settings, env));
   findings.push(...modelFindings(opts.settings, env));
+  findings.push(...politenessFindings(opts.settings, list));
 
   if (opts.settings.heal === undefined || opts.settings.heal === false) {
     findings.push({

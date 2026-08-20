@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import type { NotifyConfig } from "./notify.js";
 import type { DriftOptions } from "./history.js";
 import type { ModelConfig } from "./providers.js";
+import type { PolitenessConfig } from "./politeness.js";
 
 /**
  * Project-level settings, so a deployment is a committed file plus environment
@@ -25,6 +26,8 @@ export interface MenderSettings {
   /** Record each healthy run into history, building the drift baseline. */
   record?: boolean;
   drift?: DriftOptions;
+  /** robots.txt and per-host rate limiting. On by default. */
+  politeness?: PolitenessConfig;
   notify?: NotifyConfig;
 }
 

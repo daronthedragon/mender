@@ -9,6 +9,7 @@ import {
   dispatch,
   headline,
 } from "./notify.js";
+import { Politeness } from "./politeness.js";
 import type { MenderSettings } from "./settings.js";
 import type { ScraperSpec } from "./types.js";
 
@@ -183,6 +184,9 @@ export async function runCycle(opts: CycleOptions): Promise<CycleReport> {
 
   const state = loadState(statePath);
   const specs = loadSpecs(scrapersDir);
+  // One instance for the whole cycle: four scrapers pointed at the same host
+  // must share its queue, or concurrency simply becomes a burst.
+  const politeness = new Politeness(settings.politeness ?? {});
   const ts = now().toISOString();
   const failures: { notifier: string; error: string }[] = [];
 
@@ -206,6 +210,7 @@ export async function runCycle(opts: CycleOptions): Promise<CycleReport> {
         ...(settings.record ? { record: true } : {}),
         ...(settings.heal !== undefined ? { heal: settings.heal } : {}),
         ...(settings.model ? { model: true } : {}),
+        politeness,
       });
     } catch (e) {
       say(`  ${spec.name}: error — ${(e as Error).message}`);
