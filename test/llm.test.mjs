@@ -153,6 +153,6 @@ const repairWith = (file, client) =>
   const saved = process.env.ANTHROPIC_API_KEY;
   delete process.env.ANTHROPIC_API_KEY;
   eq(anthropicClient(), null, "no api key means no client, rather than a crash at call time");
-  eq(anthropicClient({ apiKey: "sk-test", model: "claude-sonnet-5" }).name, "claude-sonnet-5", "an explicit key builds a client");
+  eq(anthropicClient({ apiKey: "sk-test", model: "claude-sonnet-5" }).name, "anthropic:claude-sonnet-5", "an explicit key builds a client, now named by provider too");
   if (saved !== undefined) process.env.ANTHROPIC_API_KEY = saved;
 }

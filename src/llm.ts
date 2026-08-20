@@ -3,6 +3,7 @@ import { querySelectorAll } from "./select.js";
 import { parseSelector, SelectorError } from "./select.js";
 import { extract, rowElements } from "./extract.js";
 import { ROW_TARGET } from "./propose.js";
+import { createModelClient } from "./providers.js";
 import type { Candidate, ScraperSpec } from "./types.js";
 
 /**
@@ -18,43 +19,21 @@ export interface ModelClient {
 
 export const DEFAULT_MODEL = "claude-sonnet-5";
 
+/**
+ * Kept as a thin wrapper over the provider layer so existing callers and the
+ * `--model` flag keep working unchanged. New code should prefer
+ * `createModelClient`, which speaks to any supported provider.
+ */
 export function anthropicClient(opts: {
   apiKey?: string | undefined;
   model?: string | undefined;
   baseUrl?: string | undefined;
 } = {}): ModelClient | null {
-  const apiKey = opts.apiKey ?? process.env["ANTHROPIC_API_KEY"];
-  if (!apiKey) return null;
-  const model = opts.model ?? process.env["MENDER_MODEL"] ?? DEFAULT_MODEL;
-  const baseUrl = opts.baseUrl ?? "https://api.anthropic.com";
-
-  return {
-    name: model,
-    async complete(req) {
-      const res = await fetch(`${baseUrl}/v1/messages`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify({
-          model,
-          max_tokens: req.maxTokens,
-          system: req.system,
-          messages: [{ role: "user", content: req.user }],
-        }),
-      });
-      if (!res.ok) {
-        throw new Error(`anthropic ${res.status}: ${(await res.text()).slice(0, 300)}`);
-      }
-      const body = (await res.json()) as { content?: { type: string; text?: string }[] };
-      return (body.content ?? [])
-        .filter((c) => c.type === "text")
-        .map((c) => c.text ?? "")
-        .join("");
-    },
-  };
+  return createModelClient({
+    provider: "anthropic",
+    ...(opts.model ? { model: opts.model } : {}),
+    ...(opts.baseUrl ? { baseUrl: opts.baseUrl } : {}),
+  }, opts.apiKey ? { env: { ...process.env, ANTHROPIC_API_KEY: opts.apiKey } } : {});
 }
 
 const SYSTEM = `You repair broken CSS selectors for a web scraper.

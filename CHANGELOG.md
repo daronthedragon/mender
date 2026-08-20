@@ -3,6 +3,42 @@
 All notable changes to this project are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] — 2026-08-20
+
+### Added — the model proposer is no longer Claude-only
+
+The repair loop only ever needed one thing from a model: text in, text out.
+Keeping that interface one method wide means a provider is a request shape and
+a response path rather than an integration — and it means a model running on a
+laptop is a first-class option, not a downgrade.
+
+- **anthropic**, **openai**, **gemini**, **ollama**, chosen explicitly or
+  inferred from whichever API key is in the environment.
+- **Any OpenAI-compatible endpoint** via `--base-url`: Groq, Together,
+  OpenRouter, vLLM, LM Studio, llama.cpp. Verified end to end by repairing a
+  real page through a local server with no Anthropic key present.
+- **Ollama needs no key at all**, so nothing has to leave the machine.
+- Config, flags (`--provider`, `--model-name`, `--base-url`) or environment
+  (`MENDER_PROVIDER`, `MENDER_MODEL`, `MENDER_BASE_URL`). Keys are still named
+  variables, never values in a config file.
+
+### Added — robustness in the model path
+
+- Retries with exponential backoff on 429 and 5xx, honouring `Retry-After`.
+  A 400 or 401 fails immediately, because retrying cannot help.
+- Per-request timeouts, and transport failures surfaced as `ProviderError`.
+- The Gemini key travels in a header rather than the query string, so it never
+  lands in a proxy log or in an error message containing the URL.
+- `mender doctor` reports the resolved provider and model, and names the exact
+  variable to export when a key is missing.
+
+`anthropicClient()` still works and now delegates to the provider layer, so it
+gains the retries too. Its `name` is now `anthropic:<model>` rather than bare
+`<model>` — the only visible break, and it appears in repair output as
+`fixed price via anthropic:claude-sonnet-5`.
+
+567 assertions, up from 502.
+
 ## [1.1.0] — 2026-08-20
 
 ### Fixed — a repair could silently drop half your data

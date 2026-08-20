@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import type { NotifyConfig } from "./notify.js";
 import type { DriftOptions } from "./history.js";
+import type { ModelConfig } from "./providers.js";
 
 /**
  * Project-level settings, so a deployment is a committed file plus environment
@@ -12,8 +13,11 @@ export interface MenderSettings {
   history?: string;
   /** Repair automatically. "write" persists repaired selectors to the spec. */
   heal?: boolean | "write";
-  /** Consult a model when the heuristics come up empty. */
-  model?: boolean;
+  /**
+   * Consult a model when the heuristics come up empty. `true` infers the
+   * provider from whichever API key is in the environment; an object pins it.
+   */
+  model?: boolean | ModelConfig;
   /** Seconds between cycles in watch mode. */
   interval?: number;
   /** How many scrapers to run at once. */

@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/daronthedragon/mender/actions/workflows/test.yml"><img src="https://github.com/daronthedragon/mender/actions/workflows/test.yml/badge.svg" alt="tests"></a>
   <img src="https://img.shields.io/badge/dependencies-0-14B8A6" alt="zero dependencies">
-  <img src="https://img.shields.io/badge/tests-502-14B8A6" alt="502 tests">
+  <img src="https://img.shields.io/badge/tests-567-14B8A6" alt="567 tests">
   <img src="https://img.shields.io/badge/node-%E2%89%A520-334155" alt="node >= 20">
   <img src="https://img.shields.io/badge/license-MIT-334155" alt="MIT">
 </p>
@@ -274,10 +274,37 @@ The `file` channel is append-only JSONL and never rate-limits, which makes it th
 
 Pointing a model at every page is slow, costs money per request, and returns slightly different answers each time. Here the hot path stays plain deterministic CSS. Heuristics — DOM signatures, text shapes, path similarity — handle breakage first and need no API key. **The model is consulted only when they come up empty.**
 
+**Any provider, including one running on your laptop.** The repair loop needs one thing from a model — text in, text out — so the provider layer is a request shape and a response path, not an integration:
+
+| Provider | Key | Notes |
+| --- | --- | --- |
+| `anthropic` | `ANTHROPIC_API_KEY` | default `claude-sonnet-5` |
+| `openai` | `OPENAI_API_KEY` | default `gpt-4o-mini` |
+| `gemini` | `GEMINI_API_KEY` / `GOOGLE_API_KEY` | default `gemini-2.0-flash` |
+| `ollama` | *none* | default `llama3.1`, fully local |
+
 ```bash
-export ANTHROPIC_API_KEY=sk-...
+export OPENAI_API_KEY=sk-...        # provider inferred from whichever key is set
 mender repair scrapers/pricing.json --model
 ```
+
+```bash
+# a local model, no key, nothing leaves the machine
+mender repair scrapers/pricing.json --model --provider ollama --model-name qwen2.5-coder
+```
+
+```bash
+# any OpenAI-compatible endpoint: Groq, Together, OpenRouter, vLLM, LM Studio, llama.cpp
+mender repair scrapers/pricing.json --model   --provider openai --base-url http://127.0.0.1:1234/v1 --model-name qwen2.5-coder
+```
+
+Or pin it in `mender.config.json`, where the key is still a variable *name*:
+
+```json
+"model": { "provider": "ollama", "model": "qwen2.5-coder", "baseUrl": "http://127.0.0.1:11434" }
+```
+
+Requests retry on 429 and 5xx with exponential backoff and honour `Retry-After`; a 400 or 401 fails immediately, because retrying cannot help. The Gemini key travels in a header rather than the query string, so it never lands in a proxy log.
 
 Its proposals face the identical four gates. Four properties the tests pin down:
 
@@ -701,7 +728,7 @@ Named honestly, because a self-healing tool that overstates itself is the worst 
 
 ## Tests
 
-502 assertions. No network beyond servers the suite starts itself, and no API key — the model path runs through an injected fake client. The browser suite adapts to whether Playwright is present rather than skipping silently, so CI (which has no Playwright) reports a slightly lower count.
+567 assertions. No network beyond servers the suite starts itself, and no API key — the model path runs through an injected fake client. The browser suite adapts to whether Playwright is present rather than skipping silently, so CI (which has no Playwright) reports a slightly lower count.
 
 ```bash
 npm test

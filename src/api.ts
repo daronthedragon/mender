@@ -1,7 +1,8 @@
 import { loadSpec, loadSpecs, patchSpecFile, validateSpec } from "./config.js";
 import { runCheck, runRepair } from "./repair.js";
 import { type PageFetcher, playwrightFetcher } from "./browser.js";
-import { anthropicClient, type ModelClient } from "./llm.js";
+import type { ModelClient } from "./llm.js";
+import { type ModelConfig, createModelClient } from "./providers.js";
 import { saveFixture, todayStamp } from "./fixtures.js";
 import { ROW_TARGET } from "./propose.js";
 import type { DriftFinding } from "./history.js";
@@ -27,8 +28,11 @@ export interface ScrapeOptions {
    *  "write" - as above, and persist the repaired selectors to the spec file
    */
   heal?: boolean | "write";
-  /** Ask a model when the heuristics come up empty. `true` reads ANTHROPIC_API_KEY. */
-  model?: ModelClient | boolean | null;
+  /**
+   * Ask a model when the heuristics come up empty. `true` infers the provider
+   * from the environment, an object pins one, or pass your own ModelClient.
+   */
+  model?: ModelClient | ModelConfig | boolean | null;
   /** Render with a browser. Also implied by a spec with a `render` block. */
   render?: boolean;
   /** Use this HTML instead of fetching. */
@@ -80,8 +84,10 @@ function label(target: string): string {
 
 function resolveModel(model: ScrapeOptions["model"]): ModelClient | null {
   if (!model) return null;
-  if (model === true) return anthropicClient();
-  return model;
+  if (model === true) return createModelClient();
+  // A plain object is a provider config; anything with complete() is a client.
+  if (typeof (model as ModelClient).complete === "function") return model as ModelClient;
+  return createModelClient(model as ModelConfig);
 }
 
 /** Accepts a spec object, or a path to a spec file. */

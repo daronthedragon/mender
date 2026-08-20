@@ -5,7 +5,7 @@ import { ConfigError, loadSpec, loadSpecs, patchSpecFile } from "./config.js";
 import { runCheck, runRepair } from "./repair.js";
 import { prBody, prTitle, renderCheck, renderRepair } from "./report.js";
 import { listFixtures, loadFixtures, retire, retirementPlan, saveFixture, todayStamp } from "./fixtures.js";
-import { anthropicClient } from "./llm.js";
+import { type ModelConfig, createModelClient, describeModel } from "./providers.js";
 import { extract } from "./extract.js";
 import { validate } from "./contract.js";
 import { pruneHistory } from "./history.js";
@@ -39,7 +39,10 @@ options:
   --json             machine-readable output
   --force            fixture: archive even if the contract does not pass
   --model            repair: ask a model when the heuristics come up empty
-                     (needs ANTHROPIC_API_KEY; proposals face the same gates)
+                     (proposals face the same four gates as the heuristics)
+  --provider <name>  anthropic | openai | gemini | ollama  (default: inferred)
+  --model-name <id>  model id, e.g. gpt-4o-mini, llama3.1
+  --base-url <url>   any OpenAI-compatible endpoint, or a local server
   --record           check/drift: append this run to the history file
   --prune            fixture: retire snapshots that have stopped being useful
   --max-age-days <n> fixture --prune: retire failing snapshots older than this (default 180)
@@ -130,10 +133,22 @@ async function main(): Promise<number> {
   const historyRoot = str(args.flags, "history", settings.history ?? fixturesDir);
   const wantModel = args.flags["model"] === true || Boolean(settings.model);
 
-  const model = wantModel ? anthropicClient() : null;
+  const modelConfig: ModelConfig = typeof settings.model === "object" ? { ...settings.model } : {};
+  if (typeof args.flags["provider"] === "string") {
+    modelConfig.provider = args.flags["provider"] as ModelConfig["provider"];
+  }
+  if (typeof args.flags["model-name"] === "string") modelConfig.model = args.flags["model-name"];
+  if (typeof args.flags["base-url"] === "string") modelConfig.baseUrl = args.flags["base-url"];
+
+  const model = wantModel ? createModelClient(modelConfig) : null;
   if (wantModel && !model) {
+    const seen = describeModel(modelConfig);
     process.stderr.write(
-      yellow("--model requested but ANTHROPIC_API_KEY is not set; continuing with heuristics only\n"),
+      yellow(
+        seen.provider
+          ? `--model requested for ${seen.provider} but ${seen.keyVar ?? "its API key"} is not set; continuing with heuristics only`
+          : "--model requested but no provider is configured; set ANTHROPIC_API_KEY, OPENAI_API_KEY or GEMINI_API_KEY, or pass --provider ollama",
+      ) + "\n",
     );
   }
 

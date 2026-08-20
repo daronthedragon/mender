@@ -13,6 +13,7 @@ export * from "./signature.js";
 export * from "./verify.js";
 export * from "./browser.js";
 export * from "./init.js";
+export * from "./providers.js";
 export * from "./llm.js";
 export * from "./history.js";
 export * from "./repair.js";

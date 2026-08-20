@@ -7,6 +7,7 @@ import { listFixtures, loadFixtures, ageInDays } from "./fixtures.js";
 import { loadHistory } from "./history.js";
 import { notifiersFrom } from "./notify.js";
 import { authHeaders } from "./fetch.js";
+import { describeModel } from "./providers.js";
 import type { MenderSettings } from "./settings.js";
 import type { ScraperSpec } from "./types.js";
 
@@ -162,6 +163,43 @@ function notifyFindings(settings: MenderSettings, env: NodeJS.ProcessEnv): Findi
   }
 }
 
+function modelFindings(settings: MenderSettings, env: NodeJS.ProcessEnv): Finding[] {
+  if (!settings.model) {
+    return [
+      {
+        severity: "ok",
+        scope: "model",
+        message: "no model configured; heuristics repair on their own and cost nothing",
+      },
+    ];
+  }
+  const cfg = typeof settings.model === "object" ? settings.model : {};
+  const seen = describeModel(cfg, env);
+  if (!seen.provider) {
+    return [
+      {
+        severity: "error",
+        scope: "model",
+        message: "a model is enabled but no provider could be determined",
+        fix: "set ANTHROPIC_API_KEY, OPENAI_API_KEY or GEMINI_API_KEY, or pin one with \"provider\"",
+      },
+    ];
+  }
+  if (!seen.hasKey) {
+    return [
+      {
+        severity: "error",
+        scope: "model",
+        message: `${seen.provider} is configured but ${seen.keyVar ?? "its API key"} is not set`,
+        fix: `export ${seen.keyVar ?? "the API key"}, or switch to a local provider with "provider": "ollama"`,
+      },
+    ];
+  }
+  return [
+    { severity: "ok", scope: "model", message: `${seen.provider} / ${seen.model}, key present` },
+  ];
+}
+
 export interface DoctorOptions {
   scrapersDir: string;
   fixturesRoot: string;
@@ -209,6 +247,7 @@ export function doctor(opts: DoctorOptions): DoctorReport {
   }
   findings.push(...renderFindings(list));
   findings.push(...notifyFindings(opts.settings, env));
+  findings.push(...modelFindings(opts.settings, env));
 
   if (opts.settings.heal === undefined || opts.settings.heal === false) {
     findings.push({
