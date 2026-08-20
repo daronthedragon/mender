@@ -59,6 +59,8 @@ export interface ScraperSpec {
   paginate?: PaginateSpec;
   /** Present means "this page needs a browser". Absent means plain fetch. */
   render?: RenderSpec;
+  /** Where this scraper's rows are written. Overrides the global setting. */
+  output?: import("./sink.js").OutputConfig;
 }
 
 /**

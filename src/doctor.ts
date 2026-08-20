@@ -248,6 +248,41 @@ function politenessFindings(settings: MenderSettings, specs: ScraperSpec[]): Fin
   return out;
 }
 
+function outputFindings(settings: MenderSettings, specs: ScraperSpec[]): Finding[] {
+  const withOutput = specs.filter((s) => s.output);
+  if (!settings.output && withOutput.length === 0) {
+    return [
+      {
+        severity: "warn",
+        scope: "output",
+        message: "no output configured, so scraped rows are discarded after every run",
+        fix: 'add "output": { "path": "data/{name}.jsonl", "mode": "changes", "key": "<field>" }',
+      },
+    ];
+  }
+  const out: Finding[] = [];
+  const global = settings.output;
+  if (global) {
+    out.push({
+      severity: "ok",
+      scope: "output",
+      message: `${global.mode ?? "snapshot"} to ${global.path}${global.key ? ` keyed on ${[global.key].flat().join(", ")}` : ""}`,
+    });
+    if ((global.mode ?? "snapshot") !== "snapshot" && !global.key) {
+      out.push({
+        severity: "warn",
+        scope: "output",
+        message: `mode "${global.mode}" without a key uses the whole row as identity, so any field changing reads as a new record`,
+        fix: 'set "key" to the field that identifies a record',
+      });
+    }
+  }
+  for (const spec of withOutput) {
+    out.push({ severity: "ok", scope: spec.name, message: `own output: ${spec.output!.path}` });
+  }
+  return out;
+}
+
 export interface DoctorOptions {
   scrapersDir: string;
   fixturesRoot: string;
@@ -297,6 +332,7 @@ export function doctor(opts: DoctorOptions): DoctorReport {
   findings.push(...notifyFindings(opts.settings, env));
   findings.push(...modelFindings(opts.settings, env));
   findings.push(...politenessFindings(opts.settings, list));
+  findings.push(...outputFindings(opts.settings, list));
 
   if (opts.settings.heal === undefined || opts.settings.heal === false) {
     findings.push({

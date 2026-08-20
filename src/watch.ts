@@ -210,6 +210,7 @@ export async function runCycle(opts: CycleOptions): Promise<CycleReport> {
         ...(settings.record ? { record: true } : {}),
         ...(settings.heal !== undefined ? { heal: settings.heal } : {}),
         ...(settings.model ? { model: true } : {}),
+        ...(settings.output ? { output: settings.output } : {}),
         politeness,
       });
     } catch (e) {
@@ -254,6 +255,7 @@ export async function runCycle(opts: CycleOptions): Promise<CycleReport> {
     say(
       `  ${spec.name}: ${mark}` +
         (result.rows.length ? ` · ${result.rows.length} rows` : "") +
+        (result.output ? ` · wrote ${result.output.written} to ${result.output.path}` : "") +
         (event ? ` · ${event}${notified ? " (notified)" : changed ? "" : " (already reported)"}` : ""),
     );
 

@@ -17,6 +17,7 @@ import { type Notifier, consoleNotifier, notifiersFrom } from "./notify.js";
 import { formatDuration, loadSettings, parseDuration } from "./settings.js";
 import { runCycle, summariseCycle, watch } from "./watch.js";
 import { doctor } from "./doctor.js";
+import { type OutputConfig, writeRows } from "./sink.js";
 import { runDemo } from "./demo.js";
 import { dim, green, red, yellow } from "./color.js";
 
@@ -39,6 +40,10 @@ options:
   --html <file>      use a local html file instead of fetching
   --write            repair: apply the verified fix to the spec file
   --pr-body <file>   repair: write a pull-request body to this path
+  --out <file>       extract: write rows to a file instead of stdout
+  --format <fmt>     extract --out: jsonl | json | csv  (default: from extension)
+  --mode <mode>      extract --out: snapshot | append | changes (default snapshot)
+  --key <fields>     extract --out: field(s) identifying a record across runs
   --json             machine-readable output
   --force            fixture: archive even if the contract does not pass
   --model            repair: ask a model when the heuristics come up empty
@@ -461,7 +466,42 @@ async function main(): Promise<number> {
       if (!spec) throw new ConfigError("no spec to extract");
       const opts = htmlFrom(args.flags);
       const result = await runCheck(spec, opts);
-      process.stdout.write(JSON.stringify(result.rows, null, 2) + "\n");
+
+      const out = args.flags["out"];
+      if (typeof out === "string") {
+        // Persisting the output of a broken scraper is how a pipeline fills
+        // with nulls, and a change log records the damage as if it were news.
+        if (result.cause !== "OK" && args.flags["force"] !== true) {
+          process.stderr.write(
+            red(`refusing to write: ${spec.name} is ${result.cause} — ${result.causeDetail}\n`) +
+              dim(`  ${result.violations.length} violation(s); pass --force to write anyway\n`),
+          );
+          return 1;
+        }
+        const config: OutputConfig = {
+          path: out,
+          ...(typeof args.flags["format"] === "string"
+            ? { format: args.flags["format"] as OutputConfig["format"] }
+            : {}),
+          ...(typeof args.flags["mode"] === "string"
+            ? { mode: args.flags["mode"] as OutputConfig["mode"] }
+            : {}),
+          ...(typeof args.flags["key"] === "string"
+            ? { key: args.flags["key"].split(",").map((k) => k.trim()) }
+            : {}),
+        };
+        const written = writeRows(result.rows, spec, config, { stateDir: fixturesDir });
+        process.stdout.write(
+          green(`wrote ${written.written} record(s) to ${written.path}`) +
+            dim(
+              ` (${written.changes.added} new, ${written.changes.updated} changed, ` +
+                `${written.changes.unchanged} unchanged, ${written.changes.removed} gone)`,
+            ) +
+            "\n",
+        );
+      } else {
+        process.stdout.write(JSON.stringify(result.rows, null, 2) + "\n");
+      }
       return result.violations.length === 0 ? 0 : 1;
     }
 

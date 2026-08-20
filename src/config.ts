@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, extname, join } from "node:path";
+import { validateOutput } from "./sink.js";
 import type { FieldSpec, ScraperSpec } from "./types.js";
 
 export class ConfigError extends Error {}
@@ -103,6 +104,7 @@ export function validateSpec(raw: unknown, source: string): ScraperSpec {
     url: o["url"] as string,
     fields,
   };
+  if (o["output"] !== undefined) spec.output = validateOutput(o["output"], source);
   if (o["auth"]) spec.auth = o["auth"] as ScraperSpec["auth"];
   if (o["paginate"]) spec.paginate = o["paginate"] as ScraperSpec["paginate"];
   if (typeof o["row"] === "string") spec.row = o["row"];

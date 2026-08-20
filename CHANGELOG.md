@@ -3,6 +3,44 @@
 All notable changes to this project are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] — 2026-08-21
+
+### Added — the data actually goes somewhere
+
+mender kept scrapers alive and then threw away everything they scraped.
+`watch` read `rows.length` for a log line and discarded the rest; `extract`
+could only write to stdout. A monitor that repairs a scraper but collects
+nothing has done half a job.
+
+```json
+"output": { "path": "data/{name}.jsonl", "mode": "changes", "key": "plan" }
+```
+
+- `snapshot` overwrites with the current rows, `append` adds only rows never
+  seen, `changes` appends an event per new or changed record **with both**
+  **values**. Formats `jsonl`, `json`, `csv`, inferred from the extension.
+- Identity is by `key`, not by position, so reordered rows produce no spurious
+  change events. Without a key the whole row is the identity — `doctor` warns.
+- Available as `output` in a spec, `output` in settings (used by `watch`),
+  `scrape({ output })`, or `mender extract --out`.
+
+The point of the `changes` mode is continuity across a repair. When a site
+redeploys, moving the price element *and* changing the prices, the history has
+no gap: the move is recorded as `19 -> 21`, not as a hole where the scraper was
+broken.
+
+### Fixed — writing the output of a broken scraper
+
+Found while testing the above. `extract --out` wrote rows regardless of whether
+the contract passed, so a broken selector produced a change log full of
+`price: null` recorded as though the prices had genuinely changed to nothing.
+
+Rows are now persisted only on a run that satisfies its contract, in both the
+API and the CLI. `--force` overrides it deliberately. A repaired run counts as
+a good run, so its data is kept.
+
+699 assertions, up from 631.
+
 ## [1.4.0] — 2026-08-20
 
 ### Added — politeness, the only failure this tool can prevent

@@ -8,6 +8,7 @@ export * from "./classify.js";
 export * from "./config.js";
 export * from "./politeness.js";
 export * from "./fetch.js";
+export * from "./sink.js";
 export * from "./fixtures.js";
 export * from "./propose.js";
 export * from "./signature.js";

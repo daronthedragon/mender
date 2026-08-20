@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/daronthedragon/mender/actions/workflows/test.yml"><img src="https://github.com/daronthedragon/mender/actions/workflows/test.yml/badge.svg" alt="tests"></a>
   <img src="https://img.shields.io/badge/dependencies-0-14B8A6" alt="zero dependencies">
-  <img src="https://img.shields.io/badge/tests-631-14B8A6" alt="631 tests">
+  <img src="https://img.shields.io/badge/tests-699-14B8A6" alt="699 tests">
   <img src="https://img.shields.io/badge/node-%E2%89%A520-334155" alt="node >= 20">
   <img src="https://img.shields.io/badge/license-MIT-334155" alt="MIT">
 </p>
@@ -51,7 +51,7 @@ cause: OK
 - [The idea](#the-idea) — [contracts](#1-a-contract-not-a-selector), [causes](#2-the-cause-classifier-is-the-safety-feature), [unions](#3-repairs-are-unions-not-overwrites), [gates](#4-four-gates)
 - [Watch mode](#watch-mode) · [Notifications](#notifications)
 - [The model](#the-model-is-optional-and-never-in-the-hot-path) · [Drift](#semantic-drift)
-- [Rendering, pagination, auth](#rendering-pagination-and-auth) · [Politeness](#politeness) · [Fixtures](#fixtures)
+- [Where the data goes](#where-the-data-goes) · [Rendering, pagination, auth](#rendering-pagination-and-auth) · [Politeness](#politeness) · [Fixtures](#fixtures)
 - [Doctor](#doctor)
 - **Reference**: [spec](#spec-reference) · [config](#config-reference) · [CLI](#cli-reference) · [library](#library-reference)
 - [CI](#continuous-integration) · [Recipes](#recipes) · [Architecture](#architecture)
@@ -389,6 +389,58 @@ npm install playwright && npx playwright install chromium
 **Auth** names environment variables; specs never hold secrets, and config *rejects* a value that looks like a literal token. Credentials are sent on every paginated page. A missing variable is `HTTP_ERROR` naming the variable, never a layout change — repairing selectors against a login page is exactly what this tool exists to prevent.
 
 Both transports run through one code path, so pagination, auth, loop guards and failure semantics are identical, and a failed render is status `0` like any transport failure.
+
+## Where the data goes
+
+Until now mender kept scrapers alive and then threw away everything they scraped: `watch` read `rows.length` for a log line and discarded the rest, and `extract` could only write to stdout. A monitor that repairs a scraper but collects nothing has done half a job.
+
+```json
+"output": { "path": "data/{name}.jsonl", "mode": "changes", "key": "plan" }
+```
+
+| Mode | Behaviour |
+| --- | --- |
+| `snapshot` | Overwrite the file with the current rows. No memory — the file is what the page says now. |
+| `append` | Add rows never seen before. Re-running adds nothing. |
+| `changes` | Append an event per new or changed record, **with both values**. |
+
+Formats are `jsonl`, `json` and `csv`, inferred from the extension. `{name}` and `{date}` are substituted into the path.
+
+**`changes` is the mode worth having.** Because a row has an identity across runs, a price moving from 19 to 21 is recorded as an event rather than as two snapshots someone has to diff later:
+
+```json
+{"_change":"added","_at":"…","plan":"Starter","price":19}
+{"_change":"updated","_at":"…","_before":{"plan":"Starter","price":19},"plan":"Starter","price":21}
+```
+
+Identity is by `key`, not by position, so reordered rows are recognised as the same records and produce no spurious events. Without a `key` the whole row is the identity, which still dedupes but reads every edit as a new record — `doctor` warns when you have done that.
+
+### It writes only what it trusts
+
+Rows are persisted **only on a run that satisfies its contract**. Persisting the output of a broken scraper is how a pipeline fills with nulls, and in `changes` mode it would record the damage as if it were news. A repaired run *is* a good run, so its data is kept — which is the whole point of having repaired anything:
+
+```
+$ mender watch --once
+  pricing: ok · 3 rows · wrote 3 to data/prices.jsonl
+
+  … the site redeploys, moving the price element AND changing prices …
+
+🟢 pricing repaired itself
+  pricing: repaired · 3 rows · wrote 3 to data/prices.jsonl · repaired (notified)
+```
+
+```
+added   Starter  price: 19
+added   Pro      price: 49
+added   Scale    price: 199
+updated Starter  price: 21    (was 19)
+updated Pro      price: 54    (was 49)
+updated Scale    price: 219   (was 199)
+```
+
+**No gap in the history.** The selector broke, was repaired, and the price move was recorded as a change rather than as a hole.
+
+`mender extract --out` does the same thing one-shot, and refuses to write a failing run unless you pass `--force`.
 
 ## Politeness
 
@@ -791,7 +843,7 @@ Named honestly, because a self-healing tool that overstates itself is the worst 
 
 ## Tests
 
-631 assertions. No network beyond servers the suite starts itself, and no API key — the model path runs through an injected fake client. The browser suite adapts to whether Playwright is present rather than skipping silently, so CI (which has no Playwright) reports a slightly lower count.
+699 assertions. No network beyond servers the suite starts itself, and no API key — the model path runs through an injected fake client. The browser suite adapts to whether Playwright is present rather than skipping silently, so CI (which has no Playwright) reports a slightly lower count.
 
 ```bash
 npm test

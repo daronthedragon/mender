@@ -4,6 +4,7 @@ import { type PageFetcher, playwrightFetcher } from "./browser.js";
 import type { ModelClient } from "./llm.js";
 import { type ModelConfig, createModelClient } from "./providers.js";
 import { Politeness, type PolitenessConfig } from "./politeness.js";
+import { type OutputConfig, type WriteResult, writeRows } from "./sink.js";
 import { saveFixture, todayStamp } from "./fixtures.js";
 import { ROW_TARGET } from "./propose.js";
 import type { DriftFinding } from "./history.js";
@@ -46,6 +47,11 @@ export interface ScrapeOptions {
   timeoutMs?: number;
   /** Archive the page as a fixture when the run is healthy and none exists yet. */
   archiveFirstRun?: boolean;
+  /**
+   * Write the rows somewhere. The spec's own `output` wins over this. `false`
+   * disables writing even when the spec asks for it.
+   */
+  output?: OutputConfig | false;
   /** Progress callback. Useful for logging inside a pipeline. */
   onEvent?: (event: MenderEvent) => void;
 }
@@ -55,7 +61,8 @@ export type MenderEvent =
   | { type: "healing"; name: string; cause: Cause }
   | { type: "healed"; name: string; target: string; selector: string; via: string }
   | { type: "unhealed"; name: string; target: string; reason: string }
-  | { type: "drift"; name: string; findings: DriftFinding[] };
+  | { type: "drift"; name: string; findings: DriftFinding[] }
+  | { type: "wrote"; name: string; path: string; written: number };
 
 export interface HealedSelector {
   /** Field name, or "row" for the record selector. */
@@ -80,6 +87,8 @@ export interface ScrapeResult {
   /** The spec actually used, including any in-memory repairs. */
   spec: ScraperSpec;
   pages: number;
+  /** Where the rows were written, if anywhere. */
+  output?: WriteResult;
 }
 
 export class MenderError extends Error {}
@@ -94,6 +103,24 @@ function resolveModel(model: ScrapeOptions["model"]): ModelClient | null {
   // A plain object is a provider config; anything with complete() is a client.
   if (typeof (model as ModelClient).complete === "function") return model as ModelClient;
   return createModelClient(model as ModelConfig);
+}
+
+/**
+ * Rows are written only on a run that satisfies its contract. Persisting the
+ * output of a broken scraper is how a pipeline fills with nulls.
+ */
+function persist(
+  result: ScrapeResult,
+  opts: ScrapeOptions,
+  fixtures: string,
+  emit: (e: MenderEvent) => void,
+): WriteResult | undefined {
+  if (opts.output === false) return undefined;
+  const config = opts.output ?? result.spec.output;
+  if (!config || !result.ok) return undefined;
+  const written = writeRows(result.rows, result.spec, config, { stateDir: fixtures });
+  emit({ type: "wrote", name: result.spec.name, path: written.path, written: written.written });
+  return written;
 }
 
 /** Accepts a spec object, or a path to a spec file. */
@@ -167,7 +194,8 @@ export async function scrape(
       if (opts.archiveFirstRun && opts.html === undefined) {
         saveFixture(fixtures, spec.name, check.fetched.html, todayStamp());
       }
-      return base;
+      const written = persist(base, opts, fixtures, emit);
+      return written ? { ...base, output: written } : base;
     }
 
     if (!opts.heal) return base;
@@ -220,7 +248,7 @@ export async function scrape(
     // Re-run against the repaired spec so the caller gets real data, not a
     // promise that it would have worked.
     const after = await runCheck(outcome.patched, runOptions);
-    return {
+    const repaired: ScrapeResult = {
       ok: after.cause === "OK",
       rows: after.rows,
       cause: after.cause,
@@ -232,6 +260,10 @@ export async function scrape(
       spec: outcome.patched,
       pages: after.pages.length,
     };
+    // A repaired run is a good run: its data is worth keeping, and it is the
+    // whole point of having repaired anything.
+    const written = persist(repaired, opts, fixtures, emit);
+    return written ? { ...repaired, output: written } : repaired;
   } finally {
     if (ownsFetcher && fetcher) await fetcher.close();
   }
