@@ -3,6 +3,7 @@ import { querySelectorAll } from "./select.js";
 import { parseNumber, rowElements } from "./extract.js";
 import {
   type Exemplar,
+  type PathStep,
   STABLE_ATTRS,
   exemplarOf,
   groupSignature,
@@ -62,38 +63,101 @@ function learnFieldExemplars(
   return out;
 }
 
-function scoreElement(el: ElementNode, row: ElementNode, exemplars: Exemplar[]): number {
-  if (exemplars.length === 0) return 0;
+/**
+ * Everything about the exemplars that does not depend on the element being
+ * scored, computed once.
+ *
+ * Scoring runs for every descendant of every row, so anything derived from the
+ * exemplar set alone was previously recomputed (elements x exemplars) times:
+ * three `modal` reductions and four linear `some` scans per element. Hoisting
+ * them turns the per-element cost into hash lookups.
+ */
+interface ExemplarProfile {
+  empty: boolean;
+  tag: string;
+  classes: string[];
+  path: PathStep[];
+  texts: Set<string>;
+  shapes: Set<string>;
+  /** Per stable attribute: the values seen, and whether any exemplar had it. */
+  attrValues: Map<string, Set<string>>;
+  firstTextLen: number;
+}
+
+function profileExemplars(exemplars: Exemplar[]): ExemplarProfile {
+  if (exemplars.length === 0) {
+    return {
+      empty: true,
+      tag: "",
+      classes: [],
+      path: [],
+      texts: new Set(),
+      shapes: new Set(),
+      attrValues: new Map(),
+      firstTextLen: 1,
+    };
+  }
+
+  const texts = new Set<string>();
+  const shapes = new Set<string>();
+  const attrValues = new Map<string, Set<string>>();
+
+  for (const e of exemplars) {
+    if (e.text) texts.add(e.text);
+    if (e.shape) shapes.add(e.shape);
+    for (const a of STABLE_ATTRS) {
+      const v = e.attrs[a];
+      if (v === undefined) continue;
+      let set = attrValues.get(a);
+      if (!set) {
+        set = new Set();
+        attrValues.set(a, set);
+      }
+      set.add(v);
+    }
+  }
+
+  return {
+    empty: false,
+    // `.sort()` mutates the exemplar's own class array, exactly as before —
+    // done once here rather than once per scored element, same end state.
+    tag: modal(exemplars, (e) => e.tag)?.tag ?? "",
+    classes: modal(exemplars, (e) => e.classes.sort().join("."))?.classes ?? [],
+    path: modal(exemplars, (e) => e.path.map((p) => p.tag).join("/"))?.path ?? [],
+    texts,
+    shapes,
+    attrValues,
+    firstTextLen: exemplars[0]!.text.length || 1,
+  };
+}
+
+function scoreElement(el: ElementNode, row: ElementNode, profile: ExemplarProfile): number {
+  if (profile.empty) return 0;
   const text = normText(el);
   if (!text && !STABLE_ATTRS.some((a) => el.attrs[a])) return 0;
 
   const shape = shapeOf(text);
-  const classes = stableClasses(el);
-  const path = pathFrom(row, el);
-
-  const modalTag = modal(exemplars, (e) => e.tag)?.tag ?? "";
-  const modalClasses = modal(exemplars, (e) => e.classes.sort().join("."))?.classes ?? [];
-  const modalPath = modal(exemplars, (e) => e.path.map((p) => p.tag).join("/"))?.path ?? [];
 
   let score = 0;
-  if (exemplars.some((e) => e.text && e.text === text)) score += 4;
-  else if (exemplars.some((e) => e.shape === shape && shape !== "")) score += 2.5;
+  if (text !== "" && profile.texts.has(text)) score += 4;
+  else if (shape !== "" && profile.shapes.has(shape)) score += 2.5;
 
-  if (el.tag === modalTag) score += 1;
-  score += 2.5 * jaccard(classes, modalClasses);
-  score += 2.5 * pathSimilarity(path, modalPath);
+  if (el.tag === profile.tag) score += 1;
+  score += 2.5 * jaccard(stableClasses(el), profile.classes);
+  score += 2.5 * pathSimilarity(pathFrom(row, el), profile.path);
 
   for (const a of STABLE_ATTRS) {
     const v = el.attrs[a];
     if (!v) continue;
-    if (exemplars.some((e) => e.attrs[a] === v)) score += 3.5;
-    else if (exemplars.some((e) => e.attrs[a] !== undefined)) score += 1;
+    const seen = profile.attrValues.get(a);
+    if (seen?.has(v)) score += 3.5;
+    else if (seen) score += 1;
     break;
   }
 
   // Prefer the element that holds the value, not an ancestor that contains it.
-  const exemplarLen = exemplars[0]!.text.length || 1;
-  if (text.length > exemplarLen * 3) score -= Math.min(2.5, text.length / (exemplarLen * 3));
+  const limit = profile.firstTextLen * 3;
+  if (text.length > limit) score -= Math.min(2.5, text.length / limit);
   if (descendants(el).length > 6) score -= 1;
 
   return score;
@@ -106,6 +170,7 @@ function proposeField(input: ProposalInput): Candidate[] {
 
   const exemplars = learnFieldExemplars(spec, goldenDocs, target);
   if (exemplars.length === 0) return [];
+  const profile = profileExemplars(exemplars);
 
   const rowSelector = input.liveRowSelector ?? spec.row;
   const liveRows = rowSelector ? querySelectorAll(liveDoc, rowSelector) : [liveDoc];
@@ -116,7 +181,7 @@ function proposeField(input: ProposalInput): Candidate[] {
 
   liveRows.forEach((row, rowIndex) => {
     const scored = descendants(row)
-      .map((el) => ({ el, score: scoreElement(el, row, exemplars) }))
+      .map((el) => ({ el, score: scoreElement(el, row, profile) }))
       .filter((c) => c.score > 1.5)
       .filter((c) => {
         // A number field can only be satisfied by text that is a number.

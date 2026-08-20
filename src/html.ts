@@ -149,7 +149,11 @@ function isSpaceCode(c: number): boolean {
 
 /** One compiled close-tag matcher per raw-text element, built once. */
 const RAWTEXT_CLOSE = new Map<string, RegExp>();
-for (const tag of RAWTEXT) RAWTEXT_CLOSE.set(tag, new RegExp(`</${tag}\s*>`, "i"));
+// `\\s`, not `\s`: inside a template literal `\s` is not an escape sequence and
+// collapses to a plain "s", which made this match `</scriptsss>` while failing
+// on the entirely legal `</script >` — and a missed close swallows the rest of
+// the document as script text.
+for (const tag of RAWTEXT) RAWTEXT_CLOSE.set(tag, new RegExp(`</${tag}\\s*>`, "i"));
 
 export function parse(html: string): ElementNode {
   const root: ElementNode = {

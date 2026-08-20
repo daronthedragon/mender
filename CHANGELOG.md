@@ -51,6 +51,27 @@ First stable release. The API surface below is what 1.x will keep.
 - **Browser rendering** via Playwright as an optional peer dependency.
 - **Pagination**, **auth** by named environment variable, **fixture retirement**.
 
+### Performance
+
+Measured with `bench/bench.mjs` against a 270 KiB synthetic page (7,292
+elements) and the real example pages. Medians of three runs.
+
+- `runRepair` over a 200-row page: **610 ms → 62 ms (9.9x)**
+- `propose()` over 200 rows: **103 ms → 3.1 ms (33x)**
+- `querySelectorAll` by class: **0.65 ms → 0.010 ms (65x)**
+- Parsing 270 KiB: **4.90 ms → 2.38 ms (2.1x)**
+- `runCheck` on a large page: **20.9 ms → 8.6 ms (2.4x)**
+
+From a candidate-narrowing index in the selector engine, per-node caches for
+descendants/children/text (the tree is immutable after `parse()`), O(1) sibling
+positions recorded at parse time, and hoisting exemplar-derived invariants out
+of the repair scoring loop — the last being the single largest win.
+
+The narrowing index assumes an element matching a compound carries that
+compound's class, tag, id or attribute name. `test/equivalence.test.mjs` guards
+it permanently with ~9,000 comparisons against an unnarrowed oracle, because a
+future selector feature that broke the assumption would fail silently.
+
 ### Fixed
 
 - `watch` passed the loaded spec object to `scrape`, so `heal: "write"` could
@@ -70,6 +91,10 @@ First stable release. The API surface below is what 1.x will keep.
   downgrading every one of them to a descendant combinator.
 - Transport failures classified as `EMPTY` rather than `HTTP_ERROR`; they are
   now marked status `0` and can never be mistaken for a repairable page.
+- The raw-text close matcher was built as `` `</${tag}\s*>` `` in a template
+  literal, where `\s` is not an escape sequence and collapses to a plain "s".
+  It therefore failed on the entirely legal `</script >` — swallowing the rest
+  of the document as script text — while wrongly matching `</scriptsss>`.
 
 ### Notes
 

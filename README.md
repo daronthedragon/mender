@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/daronthedragon/mender/actions/workflows/test.yml"><img src="https://github.com/daronthedragon/mender/actions/workflows/test.yml/badge.svg" alt="tests"></a>
   <img src="https://img.shields.io/badge/dependencies-0-14B8A6" alt="zero dependencies">
-  <img src="https://img.shields.io/badge/tests-477-14B8A6" alt="477 tests">
+  <img src="https://img.shields.io/badge/tests-484-14B8A6" alt="484 tests">
   <img src="https://img.shields.io/badge/node-%E2%89%A520-334155" alt="node >= 20">
   <img src="https://img.shields.io/badge/license-MIT-334155" alt="MIT">
 </p>
@@ -55,7 +55,7 @@ cause: OK
 - [Doctor](#doctor)
 - **Reference**: [spec](#spec-reference) · [config](#config-reference) · [CLI](#cli-reference) · [library](#library-reference)
 - [CI](#continuous-integration) · [Recipes](#recipes) · [Architecture](#architecture)
-- [FAQ](#faq) · [Troubleshooting](#troubleshooting) · [Limits](#what-it-does-not-do)
+- [Performance](#performance) · [FAQ](#faq) · [Troubleshooting](#troubleshooting) · [Limits](#what-it-does-not-do)
 
 ---
 
@@ -582,6 +582,46 @@ export SITE_COOKIE='session=abc123'
 "auth": { "cookieEnv": "SITE_COOKIE" }
 ```
 
+## Performance
+
+The hot path is a hand-written parser and selector engine, so it is measured
+rather than assumed. `bench/bench.mjs` runs against a 270 KiB synthetic page
+(7,292 elements, 200 records x 12 fields) and the real example pages.
+
+| | before | after | |
+| --- | --- | --- | --- |
+| parse 270 KiB | 4.90 ms | 2.38 ms | **2.1x** |
+| `querySelectorAll(".card")` | 0.65 ms | 0.010 ms | **65x** |
+| 12 field selectors x 200 rows | 6.95 ms | 0.26 ms | **26x** |
+| `runCheck`, large page | 20.9 ms | 8.6 ms | **2.4x** |
+| `propose()` over 200 rows | 103 ms | 3.1 ms | **33x** |
+| `runRepair`, 200-row page | 610 ms | 62 ms | **9.9x** |
+
+What did it:
+
+- **A candidate-narrowing index.** Per query root, a lazily built class / tag /
+  id / attribute-name index over the descendant array, so a selector only tests
+  elements that could possibly match. Built on the *second* query against a
+  root, so a root queried once still pays exactly one linear scan.
+- **Per-node caches** for descendants, children, text and class lists. The tree
+  is immutable after `parse()`, and `descendants()` was rebuilding a whole
+  subtree array on every call — quadratic during repair scoring.
+- **O(1) sibling positions**, recorded at parse time, so `:nth-child` and the
+  sibling combinators stop scanning.
+- **Hoisting invariants out of the scoring loop.** Repair scored every
+  descendant of every row while recomputing three reductions and four linear
+  scans over the exemplar set each time — work that depends only on the
+  exemplars. Precomputing it once turned per-element cost into hash lookups,
+  which is the single largest win above.
+
+The narrowing index rests on one assumption: an element matching a compound
+carries that compound's class, tag, id or attribute name. If a future selector
+feature breaks that — `[attr=v i]`, `:is()`, `:where()` — `querySelectorAll`
+would silently under-match while `matches()` kept working. That divergence
+would be quiet, so it has a permanent guard: `test/equivalence.test.mjs` runs
+~9,000 comparisons of the narrowed implementation against an unnarrowed oracle
+across every example page and 21 query roots each.
+
 ## Architecture
 
 ```
@@ -650,7 +690,7 @@ Named honestly, because a self-healing tool that overstates itself is the worst 
 
 ## Tests
 
-477 assertions. No network beyond servers the suite starts itself, and no API key — the model path runs through an injected fake client. The browser suite adapts to whether Playwright is present rather than skipping silently, so CI (which has no Playwright) reports a slightly lower count.
+484 assertions. No network beyond servers the suite starts itself, and no API key — the model path runs through an injected fake client. The browser suite adapts to whether Playwright is present rather than skipping silently, so CI (which has no Playwright) reports a slightly lower count.
 
 ```bash
 npm test

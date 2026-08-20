@@ -96,3 +96,17 @@ const t = (html, sel) => querySelectorAll(parse(html), sel);
   eq(normText(parse("bare text<p>then")), "bare textthen", "text nodes concatenate like textContent");
   eq(querySelectorAll(parse("<div><span>x"), "span").length, 1, "unterminated tags at EOF still parse");
 }
+
+// A raw-text close tag may carry trailing whitespace, and must not match a
+// longer tag name. Getting this wrong silently swallows the rest of the page.
+{
+  const spaced = t("<div><script>var x=1;</script ><p>after</p></div>", "p");
+  eq(spaced.length, 1, "</script > with a trailing space still closes the script");
+  eq(normText(spaced[0]), "after", "and the following content survives");
+
+  const longer = t("<div><script>var x=1;</scriptsss><p>after</p></div>", "p");
+  eq(longer.length, 0, "</scriptsss> does not close a <script>");
+
+  const styled = t("<style>a{}</style" + String.fromCharCode(9) + ">" + "<b>x</b>", "b");
+  eq(styled.length, 1, "the same holds for <style>, including a tab before the close");
+}
