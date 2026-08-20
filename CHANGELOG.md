@@ -7,6 +7,16 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 First stable release. The API surface below is what 1.x will keep.
 
+### Added — diagnostics
+
+- **`mender doctor`** — static checks over a project's setup, with the fix
+  command attached to every finding. Two of them silently disable repair and are
+  therefore errors, not warnings: no fixtures at all, and every fixture stale —
+  in both cases a repair has no known-good reference and refuses to run. Also
+  checks auth and notification environment variables, Playwright presence for
+  specs that ask to render, and whether the drift baseline is deep enough to
+  judge. Makes no network requests, so it is safe in a deploy script.
+
 ### Added — supervision
 
 - **`mender watch`** — a supervisor that runs every scraper on a cycle, repairs
