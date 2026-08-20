@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/daronthedragon/mender/actions/workflows/test.yml"><img src="https://github.com/daronthedragon/mender/actions/workflows/test.yml/badge.svg" alt="tests"></a>
   <img src="https://img.shields.io/badge/dependencies-0-14B8A6" alt="zero dependencies">
-  <img src="https://img.shields.io/badge/tests-395%20passing-14B8A6" alt="395 tests">
+  <img src="https://img.shields.io/badge/tests-395-14B8A6" alt="395 tests">
   <img src="https://img.shields.io/badge/node-%E2%89%A520-334155" alt="node >= 20">
   <img src="https://img.shields.io/badge/license-MIT-334155" alt="MIT">
 </p>
@@ -303,7 +303,7 @@ Named honestly, because a self-healing tool that overstates itself is the worst 
 
 ## Tests
 
-395 assertions. No network beyond a server the suite starts itself, and no API key — the model path runs through an injected fake client. The browser suite adapts to whether Playwright is present rather than skipping silently.
+**395 assertions with Playwright installed, 391 without** — the browser suite adapts to its environment rather than skipping silently, which is why CI (no Playwright) reports the lower number. No network beyond a server the suite starts itself, and no API key: the model path runs through an injected fake client.
 
 ```
 $ npm test
