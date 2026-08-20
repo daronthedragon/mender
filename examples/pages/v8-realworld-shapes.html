@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Shop — Example Co</title></head>
+<body>
+<!--
+  The shapes that broke inference on a real site (books.toscrape.com), reduced
+  to a fixture so the fix has a test that needs no network.
+
+  Each record contains:
+   * an <a> wrapping an image, with no text at all — it matches "a" first, so a
+     scalar field aimed at "a" reads nothing while inference, looking at every
+     match, saw the title and typed it a string.
+   * a second <a> with text, so "a" as a LIST yields 1 value per row while the
+     selector matches 2 elements — a minItems derived from element count
+     asserts more than extraction can ever produce.
+   * a button label identical on every row: furniture, not a field.
+-->
+<main>
+  <section class="grid">
+    <article class="product">
+      <a class="thumb" href="/p/1"><img src="/i/1.jpg" alt=""></a>
+      <h3><a href="/p/1">Aluminium bracket</a></h3>
+      <p class="price">£51.77</p>
+      <p class="availability">In stock</p>
+      <button class="cta">Add to basket</button>
+    </article>
+    <article class="product">
+      <a class="thumb" href="/p/2"><img src="/i/2.jpg" alt=""></a>
+      <h3><a href="/p/2">Brass fitting kit</a></h3>
+      <p class="price">£53.74</p>
+      <p class="availability">In stock</p>
+      <button class="cta">Add to basket</button>
+    </article>
+    <article class="product">
+      <a class="thumb" href="/p/3"><img src="/i/3.jpg" alt=""></a>
+      <h3><a href="/p/3">Copper pipe length</a></h3>
+      <p class="price">£3.02</p>
+      <p class="availability">In stock</p>
+      <button class="cta">Add to basket</button>
+    </article>
+    <article class="product">
+      <a class="thumb" href="/p/4"><img src="/i/4.jpg" alt=""></a>
+      <h3><a href="/p/4">Steel washer pack</a></h3>
+      <p class="price">£17.93</p>
+      <p class="availability">In stock</p>
+      <button class="cta">Add to basket</button>
+    </article>
+  </section>
+</main>
+</body>
+</html>

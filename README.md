@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/daronthedragon/mender/actions/workflows/test.yml"><img src="https://github.com/daronthedragon/mender/actions/workflows/test.yml/badge.svg" alt="tests"></a>
   <img src="https://img.shields.io/badge/dependencies-0-14B8A6" alt="zero dependencies">
-  <img src="https://img.shields.io/badge/tests-699-14B8A6" alt="699 tests">
+  <img src="https://img.shields.io/badge/tests-717-14B8A6" alt="717 tests">
   <img src="https://img.shields.io/badge/node-%E2%89%A520-334155" alt="node >= 20">
   <img src="https://img.shields.io/badge/license-MIT-334155" alt="MIT">
 </p>
@@ -835,7 +835,7 @@ Nothing until heuristics fail, which for a healthy scraper is a handful of times
 
 Named honestly, because a self-healing tool that overstates itself is the worst kind.
 
-- **Inference is a first draft.** `init` proposes types and bounds from one page; read the generated spec.
+- **Inference is a first draft.** `init` proposes types and bounds from one page; read the generated spec. It is checked against a hard invariant — a generated spec must produce no contract violations on the page it came from, asserted across every bundled page — but "passes" is not the same as "the fields you wanted".
 - **Drift from a thin baseline is noisy** — hence `provisional`.
 - **No JS interaction.** The browser renders and waits; it doesn't click, scroll or fill forms, so content behind "load more" is out of reach.
 - **Cross-field relationships are only checked structurally.** Coverage catches records being carved up wrongly, but a change that keeps every field plausible *and* every record reachable while pairing them differently — prices shifted one row up within the same rows — would still pass.
@@ -843,7 +843,7 @@ Named honestly, because a self-healing tool that overstates itself is the worst 
 
 ## Tests
 
-699 assertions. No network beyond servers the suite starts itself, and no API key — the model path runs through an injected fake client. The browser suite adapts to whether Playwright is present rather than skipping silently, so CI (which has no Playwright) reports a slightly lower count.
+717 assertions. No network beyond servers the suite starts itself, and no API key — the model path runs through an injected fake client. The browser suite adapts to whether Playwright is present rather than skipping silently, so CI (which has no Playwright) reports a slightly lower count.
 
 ```bash
 npm test

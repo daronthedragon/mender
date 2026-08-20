@@ -105,3 +105,56 @@ eq(inferSpec("", URL_, "x"), null, "an empty page yields nothing");
 }
 
 eq(formatSpec({ name: "a", url: "u", fields: {} }).endsWith("\n"), true, "formatted specs end with a newline");
+
+/* ---- the invariant: a generated spec passes the page it came from ---- */
+{
+  // This was violated on a real site. inferSpec looked at every match while
+  // extraction reads only the first one for a scalar and drops empties from a
+  // list, so the generated contract asserted things the extractor could never
+  // produce. Asserting the invariant over every bundled page keeps the two
+  // halves in step, whatever changes later.
+  const { readdirSync } = await import("node:fs");
+  const pages = readdirSync("examples/pages").filter((f) => f.endsWith(".html"));
+  let inferred = 0;
+
+  for (const file of pages) {
+    const html = readFileSync(`examples/pages/${file}`, "utf8");
+    const result = inferSpec(html, "https://example.com/x", "gen");
+    if (!result) continue;
+    inferred++;
+    const check = await runCheck(result.spec, { html });
+    // Violations, not cause: blocked.html is a challenge page and classifies
+    // BLOCKED whatever spec is pointed at it, which is orthogonal to whether
+    // the generated contract describes what the extractor produces.
+    eq(check.violations.length, 0, `the spec inferred from ${file} has no violations on ${file}`);
+  }
+  ok(inferred >= 5, `${inferred} of ${pages.length} bundled pages yielded a spec`);
+}
+
+/* ---- the real-world shapes that broke it ---- */
+{
+  const html = readFileSync("examples/pages/v8-realworld-shapes.html", "utf8");
+  const result = inferSpec(html, "https://example.com/shop", "shop");
+  ok(result, "a page of real-world shapes yields a spec");
+  eq(result.rowCount, 4, "all four products found");
+
+  const names = Object.keys(result.spec.fields);
+  const selectors = Object.values(result.spec.fields).map((f) => f.selector);
+
+  const bareLink = Object.values(result.spec.fields).find(
+    (f) => f.selector === "a" && f.type !== "list",
+  );
+  eq(bareLink, undefined, "no scalar field is aimed at an <a> whose first match is an image link");
+
+  const check = await runCheck(result.spec, { html });
+  const rows = check.rows;
+  const constantField = names.find((n) => new Set(rows.map((r) => JSON.stringify(r[n]))).size === 1);
+  eq(constantField, undefined, `no field holds the same value in every row: ${names.join(", ")}`);
+
+  eq(check.cause, "OK", "and the generated spec passes its own page");
+  ok(selectors.includes(".price"), `the price column is found: ${selectors.join(" | ")}`);
+  const price = Object.entries(result.spec.fields).find(([, f]) => f.selector === ".price");
+  eq(price[1].type, "number", "and typed as a number despite the currency symbol");
+  eq(rows[0][price[0]], 51.77, "with the value parsed correctly");
+}
+

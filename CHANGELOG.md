@@ -3,6 +3,50 @@
 All notable changes to this project are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] — 2026-08-21
+
+### Fixed — `init` could generate a spec that fails its own page
+
+Found by pointing `mender init` at real websites rather than the pages in this
+repo. On books.toscrape.com it produced a spec that immediately reported 20
+contract violations against the very page it was inferred from.
+
+Two halves had drifted apart. Inference looked at every element a selector
+matched; extraction reads only the *first* match for a scalar field, and drops
+empty values from a list. Real markup exposes the gap immediately:
+
+- An `<a>` wrapping an image matches `a` first and has no text. Inference saw
+  the title in a later match and typed the field a string; extraction read the
+  image link and produced `null`.
+- Each record matched two `<a>` elements but yielded one value, so a `minItems`
+  derived from the element count asserted more than the field can ever produce.
+
+Inference now mirrors extraction exactly: scalars are judged on the first match
+per row, list bounds on non-empty values, and a selector whose first match is
+usually empty is rejected as mis-aimed rather than named as a field.
+
+### Fixed — furniture became fields
+
+A column holding the same value in every row is a label, not data. "Add to
+basket" on all twenty rows was being named as a field, inviting a contract that
+asserts a button label. Constant columns are now skipped, and redundancy
+suppression follows the DOM upward, so the `<a>` inside an already-claimed
+`<h3>` is recognised as the same title addressed differently.
+
+On the two real sites this was found with, `init` went from 6 fields including
+3 junk ones and a failing contract, to 3 fields and `20 rows pass the generated
+contract`.
+
+### Added — an invariant instead of a hope
+
+A generated spec must produce no contract violations on the page it came from.
+That is now asserted across every bundled example page, so the two halves
+cannot drift apart again unnoticed. The real-world shapes that broke it are
+kept as `examples/pages/v8-realworld-shapes.html`, so the fix has a test that
+needs no network.
+
+717 assertions, up from 699.
+
 ## [1.5.0] — 2026-08-21
 
 ### Added — the data actually goes somewhere

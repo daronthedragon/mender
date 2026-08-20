@@ -63,7 +63,11 @@ function niceName(el: ElementNode, used: Set<string>, fallbackIndex: number): st
 interface Column {
   selector: string;
   el: ElementNode;
+  /** Non-empty values per row, exactly as extraction would produce them. */
   perRow: number[];
+  /** What a scalar field would read: the first match in each row. */
+  scalarTexts: string[];
+  /** Every non-empty value, across all rows. */
   texts: string[];
   /** The exact elements matched, used to spot columns covering the same ground. */
   els: Set<ElementNode>;
@@ -79,18 +83,33 @@ function columnsFor(rows: ElementNode[]): Column[] {
         if (bySelector.has(selector)) continue;
         let perRow: number[];
         let texts: string[];
+        let scalarTexts: string[];
         let els: Set<ElementNode>;
         try {
           const hits = rows.map((r) => querySelectorAll(r, selector));
-          perRow = hits.map((h) => h.length);
+          // Mirror extraction exactly, or the generated contract asserts things
+          // the extractor will never produce. A list drops empty values; a
+          // scalar reads ONLY the first match, which for `a` is often an image
+          // link with no text at all.
+          perRow = hits.map((h) => h.filter((e) => normText(e) !== "").length);
           texts = hits.flatMap((h) => h.map((e) => normText(e))).filter(Boolean);
+          scalarTexts = hits.map((h) => (h[0] ? normText(h[0]) : ""));
           els = new Set(hits.flat());
         } catch {
           continue;
         }
         // A column has to exist in most rows to be worth naming.
         if (perRow.filter((n) => n > 0).length < Math.ceil(rows.length * 0.6)) continue;
-        bySelector.set(selector, { selector, el, perRow, texts, els });
+        // And it has to vary. "Add to basket" on every row is furniture, not a
+        // field, and naming it invites a contract that asserts a button label.
+        if (rows.length > 2 && new Set(texts).size === 1) continue;
+        // If this were taken as a scalar, extraction would read the first match
+        // and find nothing. That is not a field, it is a mis-aimed selector.
+        const scalarShaped = perRow.every((n) => n <= 1);
+        if (scalarShaped && scalarTexts.filter(Boolean).length < Math.ceil(rows.length * 0.6)) {
+          continue;
+        }
+        bySelector.set(selector, { selector, el, perRow, texts, scalarTexts, els });
       }
     }
   }
@@ -104,15 +123,17 @@ function inferField(col: Column): FieldSpec {
     return { selector: col.selector, type: "list", minItems };
   }
 
+  // A scalar reads the first match, so judge the type from what that yields.
+  const values = col.scalarTexts.filter(Boolean);
   const numeric =
-    col.texts.length > 0 &&
-    col.texts.every((t) => parseNumber(t) !== null) &&
-    col.texts.every((t) => ["currency", "numeric"].includes(kindOf(t)));
+    values.length > 0 &&
+    values.every((t) => parseNumber(t) !== null) &&
+    values.every((t) => ["currency", "numeric"].includes(kindOf(t)));
 
   if (numeric) {
-    const values = col.texts.map((t) => parseNumber(t)!).filter((n) => Number.isFinite(n));
+    const numbers = values.map((t) => parseNumber(t)!).filter((n) => Number.isFinite(n));
     // A floor of zero on a field that has never been zero is a free contract.
-    return Math.min(...values) > 0
+    return Math.min(...numbers) > 0
       ? { selector: col.selector, type: "number", required: true, min: 0 }
       : { selector: col.selector, type: "number", required: true };
   }
@@ -147,6 +168,16 @@ function tierOf(col: Column): number {
   if (!list && !isPositional(col.selector)) return 0;
   if (list) return 1;
   return 2;
+}
+
+/** Is this element, or any ancestor up to the row, already claimed? */
+function claimedWithin(claimed: Set<ElementNode>, el: ElementNode): boolean {
+  let cur: ElementNode | null = el;
+  while (cur) {
+    if (claimed.has(cur)) return true;
+    cur = cur.parent;
+  }
+  return false;
 }
 
 export interface InferenceResult {
@@ -209,10 +240,12 @@ export function inferSpec(html: string, url: string, name: string): InferenceRes
 
     // A column whose elements are already covered by a field taken above is
     // noise, not data: once "li" is captured as a list, "li:nth-child(2)" adds
-    // nothing but a second name for the same text.
+    // nothing but a second name for the same text. An element nested inside a
+    // claimed one counts as covered too — the <a> inside a claimed <h3> is the
+    // same title, addressed differently.
     let covered = col.els.size > 0;
     for (const el of col.els) {
-      if (!claimed.has(el)) {
+      if (!claimedWithin(claimed, el)) {
         covered = false;
         break;
       }
