@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/daronthedragon/mender/actions/workflows/test.yml"><img src="https://github.com/daronthedragon/mender/actions/workflows/test.yml/badge.svg" alt="tests"></a>
   <img src="https://img.shields.io/badge/dependencies-0-14B8A6" alt="zero dependencies">
-  <img src="https://img.shields.io/badge/tests-458-14B8A6" alt="458 tests">
+  <img src="https://img.shields.io/badge/tests-477-14B8A6" alt="477 tests">
   <img src="https://img.shields.io/badge/node-%E2%89%A520-334155" alt="node >= 20">
   <img src="https://img.shields.io/badge/license-MIT-334155" alt="MIT">
 </p>
@@ -38,6 +38,7 @@ $ mender watch --heal write
 - [Watch mode](#watch-mode) · [Notifications](#notifications)
 - [The model](#the-model-is-optional-and-never-in-the-hot-path) · [Drift](#semantic-drift)
 - [Rendering, pagination, auth](#rendering-pagination-and-auth) · [Fixtures](#fixtures)
+- [Doctor](#doctor)
 - **Reference**: [spec](#spec-reference) · [config](#config-reference) · [CLI](#cli-reference) · [library](#library-reference)
 - [CI](#continuous-integration) · [Recipes](#recipes) · [Architecture](#architecture)
 - [FAQ](#faq) · [Troubleshooting](#troubleshooting) · [Limits](#what-it-does-not-do)
@@ -394,6 +395,7 @@ mender extract <spec>            print the rows a spec produces, as JSON
 mender fixture <spec>            archive today's page as a golden snapshot
 mender repair  <spec>            diagnose, propose a fix, verify it, show the diff
 mender drift   [path]            report meaning-level drift against run history
+mender doctor                    check the setup and say what is wrong with it
 
 options:
   --scrapers <dir>     spec directory                (default: scrapers)
@@ -471,6 +473,38 @@ r.pages       // how many pages were fetched
 | `parse`, `querySelectorAll` | The HTML parser and selector engine, standalone. |
 
 Healing never mutates the spec object you passed in — asserted by a test.
+
+## Doctor
+
+Everything here depends on setup you cannot see: whether a fixture still passes,
+whether history is deep enough to judge drift, whether the environment variable
+a spec names is actually exported. When `mender` silently does nothing, the
+reason is almost always one of those.
+
+```bash
+mender doctor
+```
+
+```
+ok   specs          1 spec(s) in scrapers, all valid
+ok   pricing        1 passing fixture(s)
+warn pricing        drift baseline is thin (1 observation(s)); findings will be provisional
+                    fix: run with --record so healthy runs build the baseline
+warn notify         no notification channels configured, so a break in watch mode is only visible in the log
+                    fix: add a "notify" block to mender.config.json
+warn heal           healing is off, so a break is reported but never repaired
+                    fix: set "heal": "write" in mender.config.json, or pass --heal
+
+no blocking problems, 3 warning(s)
+```
+
+Every finding carries the command that fixes it. Errors exit non-zero, warnings
+do not, so `mender doctor` is safe to put in a deploy script. It makes no network
+requests.
+
+Two findings are worth knowing about because they silently disable repair
+entirely: **no fixtures** (a repair has nothing to verify against, so it refuses
+to run) and **all fixtures stale** (no known-good reference survives).
 
 ## Continuous integration
 
@@ -602,7 +636,7 @@ Named honestly, because a self-healing tool that overstates itself is the worst 
 
 ## Tests
 
-458 assertions. No network beyond servers the suite starts itself, and no API key — the model path runs through an injected fake client. The browser suite adapts to whether Playwright is present rather than skipping silently, so CI (which has no Playwright) reports a slightly lower count.
+477 assertions. No network beyond servers the suite starts itself, and no API key — the model path runs through an injected fake client. The browser suite adapts to whether Playwright is present rather than skipping silently, so CI (which has no Playwright) reports a slightly lower count.
 
 ```bash
 npm test

@@ -15,6 +15,7 @@ import { fetchPage } from "./fetch.js";
 import { type Notifier, consoleNotifier, notifiersFrom } from "./notify.js";
 import { formatDuration, loadSettings, parseDuration } from "./settings.js";
 import { runCycle, summariseCycle, watch } from "./watch.js";
+import { doctor } from "./doctor.js";
 import { dim, green, red, yellow } from "./color.js";
 
 const USAGE = `mender — scrapers that repair themselves
@@ -27,6 +28,7 @@ usage:
   mender fixture <spec>            archive today's page as a golden snapshot (must pass first)
   mender repair  <spec>            diagnose, propose a fix, verify it, and show the diff
   mender drift   [path]            report meaning-level drift against run history
+  mender doctor                    check the setup and say what is wrong with it
 
 options:
   --scrapers <dir>   spec directory                       (default: scrapers)
@@ -149,6 +151,27 @@ async function main(): Promise<number> {
   };
 
   switch (args.command) {
+    case "doctor": {
+      const report = doctor({ scrapersDir, fixturesRoot: fixturesDir, historyRoot, settings });
+      if (asJson) {
+        process.stdout.write(JSON.stringify(report, null, 2) + "\n");
+        return report.errors > 0 ? 1 : 0;
+      }
+      const mark = { ok: green("ok  "), warn: yellow("warn"), error: red("fail") };
+      for (const f of report.findings) {
+        process.stdout.write(`${mark[f.severity]} ${f.scope.padEnd(14)} ${f.message}\n`);
+        if (f.fix) process.stdout.write(dim(`                    fix: ${f.fix}\n`));
+      }
+      process.stdout.write(
+        report.errors > 0
+          ? red(`\n${report.errors} problem(s), ${report.warnings} warning(s)\n`)
+          : report.warnings > 0
+            ? yellow(`\nno blocking problems, ${report.warnings} warning(s)\n`)
+            : green("\neverything checks out\n"),
+      );
+      return report.errors > 0 ? 1 : 0;
+    }
+
     case "watch": {
       const once = args.flags["once"] === true;
       const interval = args.flags["interval"]
