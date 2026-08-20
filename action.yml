@@ -1,4 +1,4 @@
-name: Mend the Gap
+name: Scraper Mender
 description: Keep scrapers from silently breaking. Checks them against a contract, repairs broken selectors only when the repair can be proved, and opens a pull request with the verified diff.
 author: daronthedragon
 branding:

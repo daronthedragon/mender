@@ -675,10 +675,10 @@ to run) and **all fixtures stale** (no known-good reference survives).
 
 ## Continuous integration
 
-The action is listed on the GitHub Marketplace as **Mend the Gap** — the repo, package and CLI are all still `mender`, and `uses:` takes the repo path either way.
+The action is listed on the GitHub Marketplace as **Scraper Mender**. `uses:` takes the repo path, so the listing name never appears in a workflow.
 
 ```yaml
-# listed on the GitHub Marketplace as "Mend the Gap"
+# listed on the GitHub Marketplace as "Scraper Mender"
 - uses: daronthedragon/mender@v1
   with:
     command: check
