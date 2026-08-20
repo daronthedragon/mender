@@ -1,4 +1,4 @@
-import { type ElementNode, children, classList, normText } from "./html.js";
+import { type ElementNode, classList, normText, siblingIndex } from "./html.js";
 
 /** Attributes worth building a selector on, best first. */
 export const STABLE_ATTRS = [
@@ -13,29 +13,63 @@ export const STABLE_ATTRS = [
   "aria-label",
 ];
 
+const DIGITS = /\d+/g;
+const LETTERS = /[A-Za-z]+/g;
+const SPACES = /\s+/g;
+
 /**
  * Collapse text to a shape so a price can be recognised as a price even when
  * the number changed. "$1,299.00" -> "$#,#.#" and "Pro plan" -> "W W".
  */
 export function shapeOf(text: string): string {
   return text
-    .replace(/\d+/g, "#")
-    .replace(/[A-Za-z]+/g, "W")
-    .replace(/\s+/g, " ")
+    .replace(DIGITS, "#")
+    .replace(LETTERS, "W")
+    .replace(SPACES, " ")
     .trim()
     .slice(0, 40);
 }
 
+const BUILD_PREFIX = /^(css|sc|jsx|emotion|styles?)[-_]/i;
+const HAS_DIGIT = /\d/;
+const HAS_LETTER = /[a-z]/i;
+const SHORT_HASH = /^[a-z]{1,3}-[a-z0-9]{6,}$/i;
+
+/*
+ * A page reuses the same few dozen class names thousands of times and this is
+ * asked about every one of them on every scoring pass, so the verdict is
+ * memoised. It depends on nothing but the string.
+ */
+const hashedCache = new Map<string, boolean>();
+/** A watcher runs for days across many pages, so the memo does not grow forever. */
+const HASHED_CACHE_MAX = 20000;
+
 /** Build-tool class names churn between deploys, so they make weak selectors. */
 export function looksHashed(cls: string): boolean {
-  if (/^(css|sc|jsx|emotion|styles?)[-_]/i.test(cls)) return true;
-  if (cls.length >= 8 && /\d/.test(cls) && /[a-z]/i.test(cls) && !cls.includes("-")) return true;
-  if (/^[a-z]{1,3}-[a-z0-9]{6,}$/i.test(cls)) return true;
-  return false;
+  const hit = hashedCache.get(cls);
+  if (hit !== undefined) return hit;
+  if (hashedCache.size >= HASHED_CACHE_MAX) hashedCache.clear();
+  const verdict =
+    BUILD_PREFIX.test(cls) ||
+    (cls.length >= 8 && HAS_DIGIT.test(cls) && HAS_LETTER.test(cls) && !cls.includes("-")) ||
+    SHORT_HASH.test(cls);
+  hashedCache.set(cls, verdict);
+  return verdict;
 }
 
+/**
+ * A fresh array every call on purpose: callers sort and otherwise take
+ * ownership of what they get back.
+ */
 export function stableClasses(el: ElementNode): string[] {
-  return classList(el).filter((c) => !looksHashed(c));
+  const all = classList(el);
+  if (all.length === 0) return [];
+  const out: string[] = [];
+  for (let i = 0; i < all.length; i++) {
+    const c = all[i]!;
+    if (!looksHashed(c)) out.push(c);
+  }
+  return out;
 }
 
 export function jaccard(a: string[], b: string[]): number {
@@ -59,10 +93,11 @@ export function pathFrom(root: ElementNode, el: ElementNode): PathStep[] {
   let cur: ElementNode | null = el;
   while (cur && cur !== root) {
     const parent: ElementNode | null = cur.parent;
-    const nth = parent ? children(parent).indexOf(cur) + 1 : 1;
-    steps.unshift({ tag: cur.tag, nth });
+    const nth = parent ? siblingIndex(cur) + 1 : 1;
+    steps.push({ tag: cur.tag, nth });
     cur = parent;
   }
+  steps.reverse();
   return steps;
 }
 

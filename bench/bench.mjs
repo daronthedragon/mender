@@ -137,7 +137,7 @@ await bench(
 
 /* ---------- (c) full runCheck ---------- */
 
-await bench("c1  runCheck big synthetic page", () => runCheck(BENCH_SPEC, { html: bigHtml }), { iters: 20 });
+await bench("c1  runCheck big synthetic page", () => runCheck(BENCH_SPEC, { html: bigHtml }), { iters: 40 });
 await bench(
   "c2  runCheck real pricing page x20",
   async () => { for (let i = 0; i < 20; i++) await runCheck(realSpec, { html: realPages["v1-original.html"] }); },
@@ -153,7 +153,7 @@ await bench(
       await runRepair(realSpec, { fixturesRoot: "examples/fixtures", html: realPages["v2-price-moved.html"] });
     }
   },
-  { iters: 15 },
+  { iters: 31 },
 );
 await bench(
   "d2  runRepair real v3-rows-renamed x10",
@@ -162,12 +162,12 @@ await bench(
       await runRepair(realSpec, { fixturesRoot: "examples/fixtures", html: realPages["v3-rows-renamed.html"] });
     }
   },
-  { iters: 15 },
+  { iters: 31 },
 );
 await bench(
   "d3  runRepair 200-row synthetic (price renamed)",
   () => runRepair(BENCH_SPEC, { fixturesRoot: fixRoot, html: brokenHtml }),
-  { iters: 7, warmup: 2 },
+  { iters: 21, warmup: 3 },
 );
 
 // The scoring inner loop on its own, without fetch/validate overhead.
@@ -177,12 +177,12 @@ await bench(
   await bench(
     "d4  propose(price) over 200 rows",
     () => { propose({ spec: BENCH_SPEC, liveDoc, goldenDocs, target: "price" }); },
-    { iters: 7, warmup: 2 },
+    { iters: 21, warmup: 3 },
   );
   await bench(
     "d5  propose(__row__) over 200 rows",
     () => { propose({ spec: BENCH_SPEC, liveDoc, goldenDocs, target: "__row__" }); },
-    { iters: 7, warmup: 2 },
+    { iters: 21, warmup: 3 },
   );
 }
 

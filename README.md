@@ -18,16 +18,30 @@ Scrapers don't crash when they break. They return `[]`, or `null`, or yesterday'
 
 `mender` catches that, works out **why** it happened, repairs the selector when — and only when — the repair can be proved, and tells you either way.
 
-```
-$ mender watch --heal write
+<p align="center">
+  <img src="assets/demo.svg" alt="Terminal session: mender watch --once reports pricing ok with 3 rows. The site redeploys, moving the price into a new element. The next run reports that pricing repaired itself, changing the price selector from .amount to a union including [data-testid=&quot;price-value&quot;], verified against the live page, the archive and value continuity, and sends a notification." width="760">
+</p>
 
+<details>
+<summary>The same session as text</summary>
+
+```
+$ mender watch --once
   pricing: ok · 3 rows
-  … the site redeploys, moving the price into a new element …
+1 ok
+
+# the site redeploys, moving the price into a new element
+
+$ mender watch --once
 🟢 pricing repaired itself
 1 selector(s) repaired and verified; 3 rows extracted.
+cause: OK
   price: .amount  ->  .amount, [data-testid="price-value"]   (heuristic)
   pricing: repaired · 3 rows · repaired (notified)
+1 ok, 1 repaired
 ```
+
+</details>
 
 ---
 

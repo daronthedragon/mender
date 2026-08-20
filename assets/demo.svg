@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 372" width="760" height="372" role="img"
+     aria-label="Terminal session. mender watch --once reports pricing ok with 3 rows. The site then redeploys, moving the price into a new element. The next mender watch --once reports that pricing repaired itself: one selector repaired and verified, 3 rows extracted, price selector changed from .amount to .amount plus the data-testid price-value attribute, found by the heuristic proposer, and a notification was sent.">
+  <title>mender repairing a scraper after a site redeploy</title>
+  <defs>
+    <style>
+      .bg   { fill: #0d1117; }
+      .bar  { fill: #161b22; }
+      .t    { font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace; font-size: 13px; }
+      .dim  { fill: #7d8590; }
+      .fg   { fill: #c9d1d9; }
+      .cmd  { fill: #e6edf3; font-weight: 600; }
+      .teal { fill: #2dd4bf; }
+      .amber{ fill: #f59e0b; }
+      .grey { fill: #6e7681; }
+      .red  { fill: #f85149; }
+      .grn  { fill: #3fb950; }
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="760" height="372" rx="10"/>
+  <rect class="bar" x="0" y="0" width="760" height="30" rx="10"/>
+  <rect class="bar" x="0" y="20" width="760" height="10"/>
+  <circle cx="18" cy="15" r="5" fill="#ff5f57"/>
+  <circle cx="36" cy="15" r="5" fill="#febc2e"/>
+  <circle cx="54" cy="15" r="5" fill="#28c840"/>
+  <text class="t dim" x="380" y="19" text-anchor="middle">mender</text>
+
+  <g class="t" xml:space="preserve">
+    <text x="18" y="58"><tspan class="teal">$</tspan><tspan class="cmd" dx="8">mender watch --once</tspan></text>
+    <text x="34" y="80" class="fg">pricing: <tspan class="grn">ok</tspan> · 3 rows</text>
+    <text x="18" y="102" class="fg">1 ok</text>
+
+    <text x="18" y="140" class="grey"># the site redeploys, moving the price into a new element</text>
+
+    <text x="18" y="178"><tspan class="teal">$</tspan><tspan class="cmd" dx="8">mender watch --once</tspan></text>
+
+    <text x="18" y="204" class="fg">🟢 <tspan class="grn" dx="4">pricing repaired itself</tspan></text>
+    <text x="18" y="226" class="fg">1 selector(s) repaired and verified; 3 rows extracted.</text>
+    <text x="18" y="248" class="dim">cause: OK</text>
+
+    <text x="34" y="276" class="fg">price: <tspan class="red">.amount</tspan><tspan class="dim" dx="6">-&gt;</tspan><tspan class="teal" dx="6">.amount, [data-testid="price-value"]</tspan></text>
+    <text x="88" y="298" class="dim">found by the heuristic proposer, then verified against</text>
+    <text x="88" y="316" class="dim">the live page, the archive, and value continuity</text>
+
+    <text x="34" y="344" class="fg">pricing: <tspan class="teal">repaired</tspan> · 3 rows · repaired <tspan class="amber">(notified)</tspan></text>
+  </g>
+</svg>
