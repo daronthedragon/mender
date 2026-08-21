@@ -158,3 +158,31 @@ eq(formatSpec({ name: "a", url: "u", fields: {} }).endsWith("\n"), true, "format
   eq(rows[0][price[0]], 51.77, "with the value parsed correctly");
 }
 
+/* ---- optional columns, and not choosing the wrapper over the records ---- */
+{
+  // Both shapes were found by pointing init at real sites, not by imagining
+  // them. See the comment at the top of the fixture.
+  const html = readFileSync("examples/pages/v9-optional-and-nested.html", "utf8");
+  const result = inferSpec(html, "https://example.com/board", "board");
+  ok(result, "the page yields a spec");
+
+  // The wrapper .board contains every value on the page. Choosing it would
+  // give one record instead of five.
+  eq(result.rowCount, 5, `all five records found, not the wrapper: row=${result.spec.row}`);
+  ok(result.spec.row !== ".board", "the outer wrapper is not mistaken for a record");
+  ok(!result.spec.row.includes("nth-child"), `the row selector is not positional: ${result.spec.row}`);
+
+  // The fourth record has no badge and no tags.
+  const optional = Object.entries(result.spec.fields).filter(
+    ([, f]) => f.selector === ".badge" || f.selector === "li",
+  );
+  for (const [name, field] of optional) {
+    eq(field.required, false, `${name} is optional, because one record lacks it`);
+    eq(field.minItems, undefined, `${name} carries no minItems it cannot meet on every record`);
+  }
+
+  const check = await runCheck(result.spec, { html });
+  eq(check.violations.length, 0, "and the generated spec has no violations on its own page");
+  eq(check.rows.length, 5, "extracting all five records");
+}
+

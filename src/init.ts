@@ -117,10 +117,22 @@ function columnsFor(rows: ElementNode[]): Column[] {
 }
 
 function inferField(col: Column): FieldSpec {
+  // A column is allowed to be absent from some records — real listings have
+  // optional fields. But a bound computed from only the rows that HAVE it, then
+  // asserted on every row, is a contract the page cannot satisfy. Whether the
+  // column is universal decides what may be asserted about it at all.
+  const universal = col.perRow.every((n) => n > 0);
   const scalar = col.perRow.every((n) => n <= 1);
+
   if (!scalar) {
-    const minItems = Math.max(1, Math.min(...col.perRow.filter((n) => n > 0)));
-    return { selector: col.selector, type: "list", minItems };
+    // minItems is checked unconditionally by the contract, so it can only be
+    // stated when every record has the field.
+    if (!universal) return { selector: col.selector, type: "list", required: false };
+    return {
+      selector: col.selector,
+      type: "list",
+      minItems: Math.max(1, Math.min(...col.perRow.filter((n) => n > 0))),
+    };
   }
 
   // A scalar reads the first match, so judge the type from what that yields.
@@ -133,11 +145,11 @@ function inferField(col: Column): FieldSpec {
   if (numeric) {
     const numbers = values.map((t) => parseNumber(t)!).filter((n) => Number.isFinite(n));
     // A floor of zero on a field that has never been zero is a free contract.
-    return Math.min(...numbers) > 0
-      ? { selector: col.selector, type: "number", required: true, min: 0 }
-      : { selector: col.selector, type: "number", required: true };
+    return Math.min(...numbers) > 0 && universal
+      ? { selector: col.selector, type: "number", required: universal, min: 0 }
+      : { selector: col.selector, type: "number", required: universal };
   }
-  return { selector: col.selector, type: "string", required: true };
+  return { selector: col.selector, type: "string", required: universal };
 }
 
 /** Prefer columns that vary between rows: a constant is a label, not a value. */
@@ -216,7 +228,23 @@ export function inferSpec(html: string, url: string, name: string): InferenceRes
       if (hits.length < MIN_ROWS) continue;
       const overshoot = Math.abs(hits.length - rows.length) / rows.length;
       const specificity = stableClasses(sample).length > 0 ? 1 : 0;
-      const score = valueCount * 1.5 + Math.min(avgText, 200) / 50 + specificity - overshoot * 3;
+
+      // valueCount is capped: a record has a handful of fields, and rewarding it
+      // without a ceiling makes an outer wrapper holding fifty values beat the
+      // record it contains. On Hacker News that chose a nested table row over
+      // the thirty stories.
+      const density = Math.min(valueCount, 8) * 1.2;
+
+      // More records is better evidence that this is the repeating unit. Log so
+      // that 30 beats 4 decisively while 300 does not swamp everything else.
+      const volume = Math.log2(hits.length) * 1.5;
+
+      // A positional row selector is both brittle and usually a coincidence:
+      // "tr:nth-child(1)" names a position, not a kind of thing.
+      const positional = isPositional(selector) ? 3 : 0;
+
+      const score =
+        density + volume + Math.min(avgText, 200) / 50 + specificity - overshoot * 3 - positional;
       if (!best || score > best.score) best = { rows: hits, selector, score };
     }
   }

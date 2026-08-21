@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Board — Example Co</title></head>
+<body>
+<!--
+  Two shapes found by pointing init at real sites.
+
+  1. An OPTIONAL column. The fourth record has no .badge and no tags. A bound
+     computed from only the records that HAVE the column, then asserted on every
+     record, is a contract the page cannot satisfy — which is exactly how a
+     generated spec came back reporting violations against its own page.
+
+  2. A NESTED wrapper that holds many values. The outer .board contains every
+     record, so a scorer that rewards "number of values inside" without a
+     ceiling prefers the wrapper over the records it contains. On Hacker News
+     that picked a nested table row and found 4 stories instead of 30.
+-->
+<main class="board">
+  <article class="entry">
+    <span class="rank">1</span>
+    <h3 class="headline">Aluminium bracket</h3>
+    <span class="badge">new</span>
+    <ul class="tags"><li>metal</li><li>fixings</li></ul>
+  </article>
+  <article class="entry">
+    <span class="rank">2</span>
+    <h3 class="headline">Brass fitting kit</h3>
+    <span class="badge">hot</span>
+    <ul class="tags"><li>plumbing</li><li>brass</li></ul>
+  </article>
+  <article class="entry">
+    <span class="rank">3</span>
+    <h3 class="headline">Copper pipe length</h3>
+    <span class="badge">sale</span>
+    <ul class="tags"><li>plumbing</li><li>copper</li></ul>
+  </article>
+  <article class="entry">
+    <span class="rank">4</span>
+    <h3 class="headline">Steel washer pack</h3>
+  </article>
+  <article class="entry">
+    <span class="rank">5</span>
+    <h3 class="headline">Zinc anode rod</h3>
+    <span class="badge">new</span>
+    <ul class="tags"><li>marine</li><li>zinc</li></ul>
+  </article>
+</main>
+</body>
+</html>

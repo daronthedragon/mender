@@ -3,6 +3,43 @@
 All notable changes to this project are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] — 2026-08-21
+
+### Fixed — inference on real pages
+
+Found by running `mender init` against a batch of live sites rather than the
+pages in this repo. Two failures, both invisible against hand-written fixtures.
+
+**A column present in only some records became a required field.** Real
+listings have optional fields, and inference already tolerated a column missing
+from up to 40% of records — but it then computed `minItems` from only the
+records that had it and asserted that on all of them. A generated spec came
+back reporting violations against its own page. A non-universal column is now
+`required: false` and carries no `minItems` it cannot meet everywhere.
+
+**The record scorer preferred a wrapper over the records inside it.** It
+rewarded "number of values contained" without a ceiling, so an outer container
+holding fifty values beat the record holding five. Three changes: the density
+term is capped, record count is rewarded on a log scale, and a positional row
+selector is penalised — `tr:nth-child(1)` names a position, not a kind of thing.
+
+Measured on the sites that found it:
+
+```
+                       before          after
+Hacker News            4 records       30 records, row ".athing"
+Wikipedia city list    3 records       126 records
+scrapethissite         250 records     250 records (unchanged)
+webscraper.io shop     3 records       3 records (correct — the page has 3)
+```
+
+Both shapes are kept as `examples/pages/v9-optional-and-nested.html` so the
+fixes have tests that need no network, and the existing invariant — a generated
+spec must produce no contract violations on the page it came from — now covers
+them too.
+
+728 assertions, up from 717.
+
 ## [1.5.1] — 2026-08-21
 
 ### Fixed — `init` could generate a spec that fails its own page
