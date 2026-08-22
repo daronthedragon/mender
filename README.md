@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/daronthedragon/mender/actions/workflows/test.yml"><img src="https://github.com/daronthedragon/mender/actions/workflows/test.yml/badge.svg" alt="tests"></a>
   <img src="https://img.shields.io/badge/dependencies-0-14B8A6" alt="zero dependencies">
-  <img src="https://img.shields.io/badge/tests-752-14B8A6" alt="752 tests">
+  <img src="https://img.shields.io/badge/tests-759-14B8A6" alt="759 tests">
   <img src="https://img.shields.io/badge/node-%E2%89%A520-334155" alt="node >= 20">
   <img src="https://img.shields.io/badge/license-MIT-334155" alt="MIT">
 </p>
@@ -211,13 +211,14 @@ The old branch keeps matching pages that used to work; the new branch matches to
 
 ### 4. Four gates
 
-Every proposal — heuristic or model — must clear all four:
+Every proposal — heuristic or model — must clear all four (a row repair is additionally checked that its rows are records at all):
 
 | Gate | Question | Catches |
 | --- | --- | --- |
 | **live** | Does the union clear the violations it targets? | Proposals that don't work. |
 | **archive** | Does it extract *byte-identical* data from every stored snapshot? | A new branch that also matches something on the old pages, silently rewriting history. |
 | **coverage** | Do the rows still reach as much of the page as they used to? | Records carved up wrongly — a selector that grabs two records per match and drops half the page. |
+| **records** | For a row repair: are the selected rows actually records? | A row selector that drags in a table header — the count stays in range while the data gains an empty row. |
 | **continuity** | Do the values still mean the same thing? | The wrong element. |
 
 Gate three exists because the first two can both pass on a bad fix. If a price is genuinely gone and a star rating sits nearby, the rating satisfies `type: number, min: 1` today and matches nothing in the archives — gates one and two are happy:
@@ -846,7 +847,7 @@ Named honestly, because a self-healing tool that overstates itself is the worst 
 
 ## Tests
 
-752 assertions. No network beyond servers the suite starts itself, and no API key — the model path runs through an injected fake client. The browser suite adapts to whether Playwright is present rather than skipping silently, so CI (which has no Playwright) reports a slightly lower count.
+759 assertions. No network beyond servers the suite starts itself, and no API key — the model path runs through an injected fake client. The browser suite adapts to whether Playwright is present rather than skipping silently, so CI (which has no Playwright) reports a slightly lower count.
 
 ```bash
 npm test

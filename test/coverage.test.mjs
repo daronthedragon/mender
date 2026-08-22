@@ -82,3 +82,63 @@ const gate = (result, name) => result.passes.find((p) => p.source === name);
   const r = tryRow(page("v3-rows-renamed.html"), ".plan-card");
   eq(gate(r, "coverage").ok, true, "capturing the same fraction is fine");
 }
+
+section("a row selector must select records");
+
+/**
+ * Found by mutating real pages. Judging a row repair on row COUNT alone let a
+ * candidate add a table header row to 1,595 real ones on the IANA TLD list: the
+ * count stayed inside expectations, the archive was untouched because the new
+ * branch matched nothing there, and coverage was unaffected — so every gate
+ * passed while the data gained `{"domain": null, "type": "Domain"}`.
+ */
+{
+  const { inferSpec } = await import("../dist/init.js");
+  const html = readFileSync("examples/pages/v10-tables.html", "utf8");
+  const tableSpec = inferSpec(html, "https://example.com/stock", "stock").spec;
+
+  const before = (await runCheck(tableSpec, { html })).rows;
+  eq(before.length, 5, "five records before anything breaks");
+
+  // The header row is a <tr> like any other; a selector reaching it adds a row
+  // whose cells are all <th>, so every td-addressed field comes back null.
+  const withHeader = { ...tableSpec, row: "table.stock tr" };
+  const bad = await runCheck(withHeader, { html });
+  eq(bad.rows.length, 6, "a selector that reaches the header yields one row too many");
+  eq(bad.rows[0].supplier, null, "and that row is empty where a record would have values");
+
+  const verdict = verifyCandidate({
+    spec: tableSpec,
+    candidate: { target: "__row__", selector: "table.stock tr", score: 1, reason: "t", via: "t" },
+    live: { source: "live", doc: parse(html) },
+    goldens: [{ source: "g", doc: parse(html) }],
+  });
+  const liveGate = verdict.passes.find((p) => p.source === "live");
+  eq(liveGate.ok, false, "the live gate refuses it");
+  ok(
+    liveGate.detail.includes("not records"),
+    `naming why rather than citing a row count: ${liveGate.detail}`,
+  );
+  eq(verdict.verified, false, "so the candidate is not accepted");
+}
+
+{
+  // A field broken in EVERY row is independently broken and must not block a
+  // row repair — the row is fixed first and the field is repaired after.
+  const { inferSpec } = await import("../dist/init.js");
+  const html = readFileSync("examples/pages/v10-tables.html", "utf8");
+  const base = inferSpec(html, "https://example.com/stock", "stock").spec;
+  const withDeadField = {
+    ...base,
+    fields: { ...base.fields, supplier: { ...base.fields.supplier, selector: ".gone" } },
+  };
+  const verdict = verifyCandidate({
+    spec: withDeadField,
+    candidate: { target: "__row__", selector: base.row, score: 1, reason: "t", via: "t" },
+    live: { source: "live", doc: parse(html) },
+    goldens: [],
+  });
+  const liveGate = verdict.passes.find((p) => p.source === "live");
+  eq(liveGate.ok, true, "a wholly broken field does not veto the row repair");
+}
+

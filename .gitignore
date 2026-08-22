@@ -2,3 +2,5 @@ node_modules
 dist
 *.log
 examples/fixtures/*/rows.json
+bench/pages/
+bench/.work/

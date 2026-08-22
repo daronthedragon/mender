@@ -44,6 +44,50 @@ function relevant(violations: Violation[], target: string): Violation[] {
   return violations.filter((v) => v.field === target);
 }
 
+/**
+ * A row selector that drags in something which is not a record.
+ *
+ * Judging a row repair on row COUNT alone let a candidate add a table's header
+ * row to 1,595 real ones: the count stayed within expectations, the archive was
+ * untouched because the new branch matched nothing there, and coverage was
+ * unaffected — so every gate passed while the data gained a junk row reading
+ * `{"domain": null, "type": "Domain"}`.
+ *
+ * The signature is a field that works in most rows and fails in a few. A field
+ * failing in EVERY row is independently broken and must not block the row
+ * repair, since the row is fixed first and the field is repaired after.
+ */
+function rowsAreRecords(
+  doc: ElementNode,
+  patched: ScraperSpec,
+  violations: Violation[],
+): { ok: boolean; detail: string } {
+  const total = extract(doc, patched).length;
+  if (total === 0) return { ok: true, detail: "no rows to judge" };
+
+  const perField = new Map<string, Set<number>>();
+  for (const v of violations) {
+    if (!v.field || v.row === undefined) continue;
+    const rows = perField.get(v.field) ?? new Set<number>();
+    rows.add(v.row);
+    perField.set(v.field, rows);
+  }
+
+  for (const [field, rows] of perField) {
+    if (rows.size === 0 || rows.size === total) continue; // wholly broken field
+    const share = rows.size / total;
+    if (share < 0.5) {
+      return {
+        ok: false,
+        detail:
+          `${rows.size} of ${total} rows fail on ${field} while the rest pass — ` +
+          "those rows are not records",
+      };
+    }
+  }
+  return { ok: true, detail: `all ${total} rows look like records` };
+}
+
 function snapshot(doc: ElementNode, spec: ScraperSpec): string {
   return JSON.stringify(toRows(extract(doc, spec)));
 }
@@ -275,13 +319,22 @@ export function verifyCandidate(input: VerifyInput): VerifiedCandidate {
   }
 
   const stillBroken = relevant(liveViolations, candidate.target);
+  // A row repair is additionally judged on whether the rows it selects are
+  // records at all, not merely on how many there are.
+  const records =
+    candidate.target === ROW_TARGET
+      ? rowsAreRecords(live.doc, patched, liveViolations)
+      : { ok: true, detail: "" };
+
   passes.push({
     source: live.source,
-    ok: stillBroken.length === 0,
+    ok: stillBroken.length === 0 && records.ok,
     detail:
-      stillBroken.length === 0
-        ? `${extract(live.doc, patched).length} rows pass for ${candidate.target}`
-        : stillBroken[0]!.detail,
+      stillBroken.length > 0
+        ? stillBroken[0]!.detail
+        : records.ok
+          ? `${extract(live.doc, patched).length} rows pass for ${candidate.target}`
+          : records.detail,
   });
 
   for (const g of goldens) {

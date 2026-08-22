@@ -3,6 +3,60 @@
 All notable changes to this project are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] — 2026-08-21
+
+### Added — a repair benchmark over real pages
+
+Every repair test until now used three hand-written mutation pages. `bench/`
+now snapshots fifteen real sites, infers a spec for each, mutates the page the
+way a redeploy would — row class renamed, field class renamed, class swapped
+for a `data-testid`, value wrapped in a span — and asks mender to repair it.
+
+The verdict is not "did it repair" but **"is the repaired data the same data"**.
+A repair that silently changes values is the failure this project exists to
+prevent, so it is counted separately.
+
+The first run found four of them.
+
+### Fixed — a row repair could add a row that is not a record
+
+Judging a row repair on row COUNT alone let a candidate add a table header row
+to 1,595 real ones on the IANA TLD list:
+
+```
+repaired to: ".dtable tbody tr, .dtable-v2 tr"
+  ok  live        1596 rows pass for __row__
+  ok  2026-01-01  1595 rows unchanged
+  ok  coverage    rows reach as much of the page as they used to
+  after: {"domain": null, "type": "Domain", "tld_manager": "Domain"}
+```
+
+Every gate passed. The count stayed inside expectations, the archive was
+untouched because the new branch matched nothing there, and coverage was
+unaffected — while the data gained an empty row.
+
+A row repair is now additionally judged on whether its rows are records. The
+signature is a field that works in most rows and fails in a few; a field
+failing in *every* row is independently broken and does not block the repair,
+since the row is fixed first and fields after.
+
+```
+repaired: 28  refused: 1  WRONG: 4      before
+repaired: 29  refused: 4  WRONG: 0      after
+```
+
+The three additional refusals are correct outcomes: mender could not prove a
+repair, so it changed nothing and said so.
+
+### One of the four was the benchmark's fault, not mender's
+
+The remaining `WRONG` was a bad mutation. Renaming a class by replacing the
+bare substring across the document also rewrote a domain name in the content —
+`a.baez.link` became `a.baez.link-x` — so a correct repair looked wrong. The
+mutation now renames classes inside `class` attributes only.
+
+759 assertions, up from 752.
+
 ## [1.7.2] — 2026-08-21
 
 Found by widening the live probe to forty sites and, for the first time,
