@@ -11,8 +11,9 @@ import { extract } from "./extract.js";
 import { validate } from "./contract.js";
 import { pruneHistory } from "./history.js";
 import { type PageFetcher, playwrightFetcher } from "./browser.js";
-import { formatSpec, inferSpec } from "./init.js";
+import { formatSpec, inferSpec, looksClientRendered } from "./init.js";
 import { fetchPage } from "./fetch.js";
+import { parse } from "./html.js";
 import { type Notifier, consoleNotifier, notifiersFrom } from "./notify.js";
 import { formatDuration, loadSettings, parseDuration } from "./settings.js";
 import { runCycle, summariseCycle, watch } from "./watch.js";
@@ -383,10 +384,19 @@ async function main(): Promise<number> {
 
       const inferred = inferSpec(html, url, name);
       if (!inferred) {
-        process.stderr.write(
-          red("could not find a repeating record on that page\n") +
+        process.stderr.write(red("could not find a repeating record on that page\n"));
+        if (looksClientRendered(html, parse(html))) {
+          // Telling someone to "try a listing page" when they are already on
+          // one is worse than saying nothing.
+          process.stderr.write(
+            dim("  the page is almost entirely script: its records exist only after JavaScript runs\n") +
+              dim("  retry with --render  (needs: npm install playwright && npx playwright install chromium)\n"),
+          );
+        } else {
+          process.stderr.write(
             dim("  a spec needs rows: try a listing or results page, or write the spec by hand\n"),
-        );
+          );
+        }
         return 1;
       }
 

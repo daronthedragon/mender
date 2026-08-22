@@ -3,6 +3,68 @@
 All notable changes to this project are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.1] — 2026-08-21
+
+Found by widening the live-site probe from twelve targets to twenty-four.
+
+### Fixed — a footnote list still beat a data table
+
+Trimming the furniture word list in 1.7.0 removed `reference`/`references`
+along with the genuinely ambiguous `header`. Unlike `header`, those are never
+anything else, and dropping them let a Wikipedia article pick
+`.mw-references-columns li` — 132 footnotes — over the 118-row periodic table.
+Restored, and the elements page now yields the table:
+
+```
+{ "column_1": 1, "column_2": "H", "column_3": "Hydrogen", …, "column_8": "1.0080" }
+```
+
+### Fixed — a bare tag was penalised like a positional selector
+
+`tr:nth-child(1)` names a position and deserves a veto. `li` and `tr` are how
+unclassed records are legitimately addressed, and penalising them equally made
+an `<ol>` wrapper outscore the `<li>` items inside it. The nth-child penalty
+stays; a bare tag now gets a nudge rather than a veto.
+
+### Added — "this page needs a browser" is now said out loud
+
+`init` on a client-rendered page advised trying a listing page, when the user
+was already on one. crates.io serves 5KB containing 73 characters of text; its
+records exist only after JavaScript runs. A page that is almost entirely script
+now gets the useful message instead:
+
+```
+could not find a repeating record on that page
+  the page is almost entirely script: its records exist only after JavaScript runs
+  retry with --render  (needs: npm install playwright && npx playwright install chromium)
+```
+
+A thin page with no script at all is never blamed on JavaScript.
+
+### Live results, 24 targets
+
+```
+hn          30  ".athing"                lobsters    25  ".story"
+quotes      10  ".quote"                 books       20  ".col-xs-6"
+countries  250  ".col-md-4"              hockey      25  ".team"
+tables       3  ".table-bordered2 tbody tr"          ecom         3  ".col-md-4"
+cities      85  ".static-row-numbers tr:nth-child(n+3)"
+states     205  ".sortable tr:nth-child(n+2)"
+elements   118  ".wikitable tr:nth-child(n+3)"
+editors     66  ".sticky-table-head tr:nth-child(n+3)"
+rustblog   400  ".post-list > tr"        goblog      11  ".blogtitle"
+pydownloads  7  ".row"                   nodeblog     6  (hashed class)
+danluu     200  "li"                     rfcs      9830  ".table-fixed tbody tr"
+pypi         7  ".sponsors__sponsor"
+```
+
+Twenty of twenty-four produced a verified spec. Of the rest: `crates.io` and
+`old.reddit.com` are client-rendered and now say so, `example.com` and an
+`httpbin` link page genuinely contain no records, and `gutenberg.org` returned
+HTTP 503.
+
+752 assertions, up from 747.
+
 ## [1.7.0] — 2026-08-21
 
 ### Added — tables are inferred as tables

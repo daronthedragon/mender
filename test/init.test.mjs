@@ -231,3 +231,28 @@ eq(formatSpec({ name: "a", url: "u", fields: {} }).endsWith("\n"), true, "format
   eq(check.violations.length, 0, "and it passes its own page");
 }
 
+/* ---- telling a client-rendered page apart from an empty one ---- */
+{
+  const { looksClientRendered } = await import("../dist/init.js");
+  const { parse } = await import("../dist/html.js");
+  const shell = (n) =>
+    `<html><body><div id="app"></div>${"<script src=\"/a.js\"></script>".repeat(n)}</body></html>`;
+
+  ok(looksClientRendered(shell(2), parse(shell(2))), "a script-only shell is recognised");
+
+  const real = readFileSync("examples/pages/v1-original.html", "utf8");
+  eq(looksClientRendered(real, parse(real)), false, "a server-rendered page is not");
+
+  const noScript = "<html><body><h1>Just a headline</h1></body></html>";
+  eq(
+    looksClientRendered(noScript, parse(noScript)),
+    false,
+    "a page with no script is never blamed on javascript, however thin",
+  );
+
+  // The distinction that matters: both fail to yield a spec, but only one of
+  // them is worth suggesting --render for.
+  eq(inferSpec(shell(2), URL_, "x"), null, "neither yields a spec");
+  eq(inferSpec(noScript, URL_, "x"), null, "nor does the thin static page");
+}
+

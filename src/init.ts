@@ -21,12 +21,14 @@ const LIST_CONTAINERS = new Set(["ul", "ol", "dl", "tbody", "table"]);
 /** Regions that repeat like records but never contain any. */
 const CHROME_TAGS = new Set(["nav", "footer", "header", "aside"]);
 const CHROME_ROLES = new Set(["navigation", "contentinfo", "banner", "search", "complementary"]);
+// "reference"/"references" are back: unlike "header" they are unambiguous, and
+// dropping them let a Wikipedia article's footnote list beat its data table.
 // Deliberately excludes "header" and "banner": a table carrying
 // "sticky-header-multi" is not page chrome, and matching that token rejected
 // every row of a Wikipedia data table. The <header>/<nav>/<footer>/<aside> tag
 // check below covers real chrome without guessing from class names.
 const CHROME_WORDS =
-  /(^|[-_ ])(nav|navbar|navigation|menu|footer|sidebar|breadcrumb|pagination|reflist|footnote|citation|cookie|social-share|share-buttons)([-_ ]|$)/i;
+  /(^|[-_ ])(nav|navbar|navigation|menu|footer|sidebar|breadcrumb|pagination|reference|references|reflist|footnote|citation|cookie|social-share|share-buttons)([-_ ]|$)/i;
 
 /**
  * Page furniture is structurally indistinguishable from records: a footer is
@@ -342,6 +344,20 @@ export interface InferenceResult {
   notes: string[];
 }
 
+/**
+ * A page whose HTML is mostly script and almost no text has not been rendered
+ * yet. Telling someone to "try a listing page" when they are already on one is
+ * worse than saying nothing: crates.io serves 5KB containing 73 characters of
+ * text, and the records only exist after JavaScript runs.
+ */
+export function looksClientRendered(html: string, doc: ElementNode): boolean {
+  const text = normText(doc).length;
+  if (!/<script/i.test(html)) return false;
+  if (text < 200) return true;
+  // A real page carries far more text than this relative to its markup.
+  return html.length > 20_000 && text / html.length < 0.01;
+}
+
 export function inferSpec(html: string, url: string, name: string): InferenceResult | null {
   const doc = parse(html);
   const groups = repeatedGroups(doc, MIN_ROWS);
@@ -386,9 +402,12 @@ export function inferSpec(html: string, url: string, name: string): InferenceRes
       // that 30 beats 4 decisively while 300 does not swamp everything else.
       const volume = Math.log2(hits.length) * 1.5;
 
-      // A positional row selector is both brittle and usually a coincidence:
-      // "tr:nth-child(1)" names a position, not a kind of thing.
-      const positional = isPositional(selector) ? 3 : 0;
+      // "tr:nth-child(1)" names a position, not a kind of thing, and is almost
+      // always a coincidence. A bare tag is different: "li" and "tr" are how
+      // unclassed records are legitimately addressed, so it earns a nudge away
+      // rather than a veto — penalising it equally made an <ol> wrapper beat
+      // the <li> books inside it.
+      const positional = selector.includes(":nth-child") ? 3 : isPositional(selector) ? 0.5 : 0;
 
       const score =
         density + volume + Math.min(avgText, 200) / 50 + specificity - overshoot * 3 - positional;
