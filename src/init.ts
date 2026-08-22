@@ -21,6 +21,10 @@ const LIST_CONTAINERS = new Set(["ul", "ol", "dl", "tbody", "table"]);
 /** Regions that repeat like records but never contain any. */
 const CHROME_TAGS = new Set(["nav", "footer", "header", "aside"]);
 const CHROME_ROLES = new Set(["navigation", "contentinfo", "banner", "search", "complementary"]);
+// Carousels and modals are furniture too. Kept deliberately narrow: "slide"
+// and "promo" were tried and excluded real article lists on sites that happen
+// to use those words elsewhere in a class. A rule that eats real content is
+// worse than the carousel it was meant to skip.
 // "reference"/"references" are back: unlike "header" they are unambiguous, and
 // dropping them let a Wikipedia article's footnote list beat its data table.
 // Deliberately excludes "header" and "banner": a table carrying
@@ -28,7 +32,7 @@ const CHROME_ROLES = new Set(["navigation", "contentinfo", "banner", "search", "
 // every row of a Wikipedia data table. The <header>/<nav>/<footer>/<aside> tag
 // check below covers real chrome without guessing from class names.
 const CHROME_WORDS =
-  /(^|[-_ ])(nav|navbar|navigation|menu|footer|sidebar|breadcrumb|pagination|reference|references|reflist|footnote|citation|cookie|social-share|share-buttons)([-_ ]|$)/i;
+  /(^|[-_ ])(nav|navbar|navigation|menu|footer|sidebar|breadcrumb|pagination|reference|references|reflist|footnote|citation|cookie|social-share|share-buttons|carousel|slider|modal|dialog)([-_ ]|$)/i;
 
 /**
  * Page furniture is structurally indistinguishable from records: a footer is
@@ -350,10 +354,29 @@ export interface InferenceResult {
  * worse than saying nothing: crates.io serves 5KB containing 73 characters of
  * text, and the records only exist after JavaScript runs.
  */
+const FETCHES_DATA = [
+  /fetch\s*\(/,
+  /XMLHttpRequest/,
+  /\$\.(ajax|getJSON)\s*\(/,
+  /axios/,
+  /data-reactroot/,
+  /ng-app/,
+];
+
 export function looksClientRendered(html: string, doc: ElementNode): boolean {
   const text = normText(doc).length;
+  // No script, no JavaScript to blame. A thin static page is just thin.
   if (!/<script/i.test(html)) return false;
+
+  // Almost no text at all: a shell waiting to be filled.
   if (text < 200) return true;
+
+  // A page can carry real chrome — nav, heading, prose — while its records
+  // arrive by AJAX, so size alone misses it. What separates that page from a
+  // server-rendered one is that its scripts go and fetch data. A text-length
+  // threshold was tried first and flagged a genuinely static page.
+  if (FETCHES_DATA.some((p) => p.test(html))) return true;
+
   // A real page carries far more text than this relative to its markup.
   return html.length > 20_000 && text / html.length < 0.01;
 }

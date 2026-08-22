@@ -3,6 +3,47 @@
 All notable changes to this project are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.2] — 2026-08-21
+
+Found by widening the live probe to forty sites and, for the first time,
+measuring the *quality* of what came out rather than only whether a spec was
+produced. Twenty-six of forty yielded good data on the first pass.
+
+### Added — carousels and modals are furniture
+
+A homepage hero slider is repeated siblings with text, so it reads as records:
+`hackaday.com` gave five promo tiles and `pkg.go.dev` gave the contents of a
+modal dialog. `carousel`, `slider`, `modal` and `dialog` join the furniture
+list.
+
+Deliberately narrow. `slide` and `promo` were tried first and excluded real
+article lists on sites that use those words elsewhere in a class — on one site
+*every* candidate group was rejected and the page yielded nothing at all. A
+rule that eats real content is worse than the carousel it was meant to skip.
+
+### Fixed — "needs a browser" missed pages that load records by AJAX
+
+The hint only fired on a near-empty shell, so a page with a real nav, heading
+and prose whose *records* arrive by AJAX still got the useless advice. A text
+length threshold was tried and immediately flagged a genuinely static page, so
+the signal is now whether the page's scripts go and fetch data — `fetch(`,
+`XMLHttpRequest`, `$.ajax`, `axios`, a React or Angular root:
+
+```
+scrapethissite ajax page  ->  retry with --render
+a static fixture page     ->  try a listing page, or write the spec by hand
+```
+
+### Known limits this probe made explicit
+
+- A record with a single value is not detected. `xkcd.com/archive` is a flat
+  run of `<a>` separated by `<br>` with no per-record element, so there is no
+  repeating structure to find.
+- Some sites refuse a non-browser client outright: `stackoverflow.com`,
+  `phoronix.com` and `w3.org/TR` returned HTTP 403, `imdb.com` returned 202.
+
+752 assertions, unchanged — both fixes are covered by existing tests.
+
 ## [1.7.1] — 2026-08-21
 
 Found by widening the live-site probe from twelve targets to twenty-four.
