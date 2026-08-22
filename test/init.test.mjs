@@ -186,3 +186,48 @@ eq(formatSpec({ name: "a", url: "u", fields: {} }).endsWith("\n"), true, "format
   eq(check.rows.length, 5, "extracting all five records");
 }
 
+/* ---- tables: header-named columns, and the shapes real tables have ---- */
+{
+  const html = readFileSync("examples/pages/v10-tables.html", "utf8");
+  const result = inferSpec(html, "https://example.com/stock", "stock");
+  ok(result, "a table page yields a spec");
+  eq(result.rowCount, 5, "five data rows, not six — the header is not a record");
+
+  const names = Object.keys(result.spec.fields);
+  ok(names.includes("part"), `columns are named from the header: ${names.join(", ")}`);
+  ok(names.includes("supplier"), "including supplier");
+  ok(names.includes("price"), "and price");
+
+  // Each row opens with <th scope="row">, so the first value is not a <td>.
+  eq(result.spec.fields.part.selector, "th:nth-child(1)", "a row-header cell is addressed as th, not td");
+  eq(result.spec.fields.supplier.selector, "td:nth-child(2)", "and the first td sits at position 2");
+  eq(result.spec.fields.price.type, "number", "a numeric column is typed as a number");
+
+  const check = await runCheck(result.spec, { html });
+  eq(check.violations.length, 0, "the generated spec has no violations on its own page");
+  eq(check.rows.length, 5, "extracting five records");
+  eq(check.rows[0].part, "Aluminium bracket", "with the row header as a value");
+  eq(check.rows[0].supplier, "Northgate", "and the cells in the right columns");
+  eq(check.rows[2].price, 3.02, "and numbers parsed");
+
+  // The footer repeats like records but holds none.
+  ok(!result.spec.row.includes("footer"), `the footer is not chosen as the record: ${result.spec.row}`);
+  ok(!names.includes("about"), "and its columns are not fields");
+}
+
+{
+  // A table with no header row at all must not take the table path, or it
+  // would treat its first data row as the header.
+  const bare =
+    `<html><body><table class="t"><tbody>` +
+    `<tr class="row"><td class="name">Widget</td><td class="price">$4.50</td></tr>` +
+    `<tr class="row"><td class="name">Gizmo</td><td class="price">$9.00</td></tr>` +
+    `<tr class="row"><td class="name">Doodad</td><td class="price">$1.25</td></tr>` +
+    `</tbody></table></body></html>`;
+  const result = inferSpec(bare, "https://example.com/x", "bare");
+  ok(result, "a headerless table still yields a spec");
+  eq(result.rowCount, 3, "with every row treated as data");
+  const check = await runCheck(result.spec, { html: bare });
+  eq(check.violations.length, 0, "and it passes its own page");
+}
+

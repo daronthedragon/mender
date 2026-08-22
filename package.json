@@ -1,6 +1,6 @@
 {
   "name": "mender",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Scrapers that repair themselves. Diagnoses why extraction broke, refuses to touch selectors when the page was blocked, proposes a fix with heuristics then a model, and proves it against every archived snapshot before opening a PR.",
   "type": "module",
   "bin": {

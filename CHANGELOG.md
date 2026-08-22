@@ -3,6 +3,73 @@
 All notable changes to this project are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] — 2026-08-21
+
+### Added — tables are inferred as tables
+
+A table names its own fields in the header row and addresses cells by position.
+Treating one as a generic record lost both: a Wikipedia list came back with a
+single list field holding `["City[a]", "Country", "UN 2025 population
+estimates[12]", …]` — the header row itself, captured as data.
+
+Columns are now taken from the **data** rows, not the header. A header can span
+two rows with colspan — six header cells above thirteen data columns — so
+mapping header index to cell position puts every value in the wrong place. The
+header is used only for naming, and only when the counts agree; otherwise the
+columns are `column_N` and the data is still right.
+
+Also handled, because real tables do all of it: a header in `<thead>` (data
+rows then start at position 1 inside `<tbody>`), a leading `<th scope="row">`
+so the first value is not a `<td>`, and headerless tables, which stay on the
+generic path rather than treating their first row as a header.
+
+If no selector isolates the data rows, the table path is abandoned and the
+generic search runs instead — better a generic spec that passes than a
+table-shaped one that does not.
+
+### Fixed — page furniture chosen as records
+
+A footer is repeated sibling columns with text; a nav is repeated links; a
+reference list is a long run of `<li>`. Structurally these are records, and on
+a Wikipedia list article the reference list is genuinely larger than the data
+table, so counting alone picks the wrong one. Records in `<nav>`, `<footer>`,
+`<header>`, `<aside>`, or under a navigation/contentinfo role, or in a element
+whose class names it as furniture, are now excluded.
+
+Two false positives that cost real pages, both fixed by narrowing the rule:
+
+- `sticky-header-multi` on a Wikipedia table matched the token `header`, which
+  rejected every row of the data table. Class-name matching no longer looks for
+  "header" or "banner"; the `<header>` tag check covers real chrome.
+- `vector-feature-language-in-main-menu` on `<html>` matched `menu`, vetoing
+  every record on the page. The walk now stops at `<body>`: a class there or on
+  `<html>` describes the whole document, not a region within it.
+
+### Fixed — selectors scoped only by the immediate parent
+
+A `<tr>` sits inside an unclassed `<tbody>`, so stopping at the parent produced
+a bare `tr` matching every table on the page — 124 elements where 87 were
+wanted. Selector generation now looks up to three ancestors for a named one,
+yielding `.wikitable tr`. The child combinator is still offered before the
+descendant form, being the tighter statement.
+
+### Verified against live sites
+
+```
+hn          30 rows  ".athing"          lobsters   25 rows  ".story"
+quotes      10 rows  ".quote"           books      20 rows  ".col-xs-6"
+countries  250 rows  ".col-md-4"        hockey     25 rows  ".team"
+tables       3 rows  ".table-bordered2 tbody tr"
+cities      85 rows  ".static-row-numbers tr:nth-child(n+3)"
+states     206 rows  ".sortable tr:nth-child(n+2)"
+rustblog   400 rows  ".post-list > tr"
+```
+
+Ten of twelve targets. `example.com` correctly yields no records; gutenberg.org
+returned HTTP 503 and was not reachable.
+
+747 assertions, up from 728.
+
 ## [1.6.0] — 2026-08-21
 
 ### Fixed — inference on real pages

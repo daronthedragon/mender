@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Stock — Example Co</title></head>
+<body>
+<!--
+  Table shapes found on real sites.
+
+  * The header lives in <thead>, so the data rows start at position 1 inside
+    <tbody>. An nth-child offset computed from "how many leading rows have no
+    data cells" is wrong here, and produced a spec whose every cell selector
+    reported a violation.
+  * Each data row opens with a <th scope="row">, so the first VALUE sits at
+    position 1 as a <th> and the first <td> is at position 2. Assuming cells
+    are <td> at header-index+1 puts every value in the wrong column.
+  * A footer holds a total, which is not a record.
+-->
+<main>
+  <table class="stock">
+    <thead>
+      <tr><th>Part</th><th>Supplier</th><th>Price</th><th>In stock</th></tr>
+    </thead>
+    <tbody>
+      <tr><th scope="row">Aluminium bracket</th><td>Northgate</td><td>51.77</td><td>14</td></tr>
+      <tr><th scope="row">Brass fitting kit</th><td>Ferrous Ltd</td><td>53.74</td><td>3</td></tr>
+      <tr><th scope="row">Copper pipe length</th><td>Northgate</td><td>3.02</td><td>128</td></tr>
+      <tr><th scope="row">Steel washer pack</th><td>Tyne Metals</td><td>17.93</td><td>46</td></tr>
+      <tr><th scope="row">Zinc anode rod</th><td>Ferrous Ltd</td><td>9.10</td><td>7</td></tr>
+    </tbody>
+  </table>
+</main>
+<footer class="site-footer">
+  <div class="col">About</div><div class="col">Contact</div>
+  <div class="col">Terms</div><div class="col">Privacy</div>
+</footer>
+</body>
+</html>

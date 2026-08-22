@@ -180,12 +180,20 @@ export function selectorsFor(row: ElementNode, el: ElementNode): string[] {
     for (const c of classList(el)) push(`${el.tag}.${c}`);
   }
 
-  const parent = el.parent;
-  if (parent && parent !== row) {
-    for (const pc of stableClasses(parent)) {
+  // Scope by a named ancestor, not only the immediate parent. A <tr> sits inside
+  // an unclassed <tbody>, so stopping at the parent yields a bare "tr" that
+  // matches every table on the page; the <table> two levels up usually carries
+  // the class that says which table is meant.
+  let ancestor: ElementNode | null = el.parent;
+  for (let up = 0; up < 3 && ancestor && ancestor !== row; up++) {
+    for (const pc of stableClasses(ancestor)) {
       for (const c of classes) push(`.${pc} .${c}`);
-      push(`.${pc} > ${el.tag}`);
+      // The child combinator is the tighter statement, so it is offered first;
+      // the descendant form is the fallback for a deeper nesting.
+      if (ancestor === el.parent) push(`.${pc} > ${el.tag}`);
+      push(`.${pc} ${el.tag}`);
     }
+    ancestor = ancestor.parent;
   }
 
   push(el.tag);

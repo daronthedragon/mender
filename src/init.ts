@@ -1,4 +1,4 @@
-import { type ElementNode, descendants, normText, parse } from "./html.js";
+import { type ElementNode, children, descendants, normText, parse } from "./html.js";
 import { querySelectorAll } from "./select.js";
 import { parseNumber } from "./extract.js";
 import { repeatedGroups } from "./propose.js";
@@ -17,6 +17,41 @@ const MIN_ROWS = 2;
 
 /** Containers whose class legitimately names the items inside them. */
 const LIST_CONTAINERS = new Set(["ul", "ol", "dl", "tbody", "table"]);
+
+/** Regions that repeat like records but never contain any. */
+const CHROME_TAGS = new Set(["nav", "footer", "header", "aside"]);
+const CHROME_ROLES = new Set(["navigation", "contentinfo", "banner", "search", "complementary"]);
+// Deliberately excludes "header" and "banner": a table carrying
+// "sticky-header-multi" is not page chrome, and matching that token rejected
+// every row of a Wikipedia data table. The <header>/<nav>/<footer>/<aside> tag
+// check below covers real chrome without guessing from class names.
+const CHROME_WORDS =
+  /(^|[-_ ])(nav|navbar|navigation|menu|footer|sidebar|breadcrumb|pagination|reflist|footnote|citation|cookie|social-share|share-buttons)([-_ ]|$)/i;
+
+/**
+ * Page furniture is structurally indistinguishable from records: a footer is
+ * repeated sibling columns with text, a nav is repeated links, a reference list
+ * is a long run of <li>. On a Wikipedia list article the reference list is
+ * genuinely larger than the data table, so counting alone picks the wrong one.
+ * Only the semantics separate them.
+ */
+export function inChrome(el: ElementNode): boolean {
+  let cur: ElementNode | null = el;
+  // Stops at <body>: a class on <body> or <html> describes the whole document,
+  // not a region within it, so it can never say "this part is furniture".
+  // Wikipedia ships `vector-feature-language-in-main-menu` on <html>, and
+  // matching it vetoed every record on the page.
+  while (cur && cur.tag !== "body" && cur.tag !== "html" && cur.tag !== "#document") {
+    if (CHROME_TAGS.has(cur.tag)) return true;
+    const role = cur.attrs["role"];
+    if (role && CHROME_ROLES.has(role.toLowerCase())) return true;
+    const cls = cur.attrs["class"] ?? "";
+    const id = cur.attrs["id"] ?? "";
+    if (CHROME_WORDS.test(cls) || CHROME_WORDS.test(id)) return true;
+    cur = cur.parent;
+  }
+  return false;
+}
 
 function isValueElement(el: ElementNode): boolean {
   const text = normText(el);
@@ -192,6 +227,115 @@ function claimedWithin(claimed: Set<ElementNode>, el: ElementNode): boolean {
   return false;
 }
 
+/**
+ * Tables carry their own field names in the header row, and their cells are
+ * addressed by position rather than by class. Treating them like a generic
+ * record loses both: a Wikipedia table came back with one list field holding
+ * ["City[a]", "Country", "UN 2025 population estimates[12]", …] — the header
+ * row itself, captured as data.
+ */
+function headerCells(rows: ElementNode[]): string[] {
+  const first = rows[0];
+  if (!first || first.tag !== "tr") return [];
+
+  // The header is either a row made entirely of <th>, or a <thead> above it.
+  const ths = children(first).filter((c) => c.tag === "th");
+  if (ths.length >= 2 && ths.length === children(first).length) {
+    return ths.map((c) => normText(c));
+  }
+
+  let table: ElementNode | null = first.parent;
+  while (table && table.tag !== "table") table = table.parent;
+  if (!table) return [];
+  const head = querySelectorAll(table, "thead th");
+  return head.length >= 2 ? head.map((c) => normText(c)) : [];
+}
+
+/** "UN 2025 population estimates[12]" -> "un_2025_population_estimates" */
+function headerName(text: string, used: Set<string>, index: number): string {
+  const cleaned = text
+    .replace(/\[[^\]]*\]/g, " ")
+    .replace(/[^a-zA-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toLowerCase()
+    .slice(0, 30)
+    .replace(/_+$/, "");
+  if (cleaned && !used.has(cleaned) && !/^\d+$/.test(cleaned)) return cleaned;
+  let n = `column_${index}`;
+  let i = index;
+  while (used.has(n)) n = `column_${++i}`;
+  return n;
+}
+
+interface TableShape {
+  rows: ElementNode[];
+  fields: Record<string, FieldSpec>;
+  /** Leading rows that carry no data cells, i.e. the header. */
+  headerRows: number;
+}
+
+/**
+ * Columns come from the DATA rows, not the header.
+ *
+ * A header can span two rows with colspan — a Wikipedia table has six header
+ * cells above thirteen data columns — so mapping header index to cell position
+ * puts every value in the wrong place, or in none. Positions are taken from the
+ * data; the header is used only for naming, and only when the counts agree.
+ */
+function inferTable(rows: ElementNode[]): TableShape | null {
+  const first = rows[0];
+  if (!first || first.tag !== "tr") return null;
+
+  const hasData = (r: ElementNode) => children(r).some((c) => c.tag === "td");
+  let headerRows = 0;
+  while (headerRows < rows.length && !hasData(rows[headerRows]!)) headerRows++;
+
+  const dataRows = rows.slice(headerRows).filter(hasData);
+  if (dataRows.length < MIN_ROWS || headerRows === 0) return null;
+
+  const headers = headerCells(rows);
+  const width = Math.max(...dataRows.map((r) => children(r).length));
+  const named = headers.length === width;
+
+  const fields: Record<string, FieldSpec> = {};
+  const used = new Set<string>();
+
+  for (let pos = 1; pos <= width && Object.keys(fields).length < MAX_FIELDS; pos++) {
+    // A cell at a given position may be a <td> or a leading row-header <th>.
+    let selector = "";
+    let values: string[] = [];
+    for (const tag of ["td", "th"]) {
+      const candidate = `${tag}:nth-child(${pos})`;
+      const got = dataRows.map((r) => {
+        const cell = querySelectorAll(r, candidate)[0];
+        return cell ? normText(cell) : "";
+      });
+      if (got.filter(Boolean).length > values.filter(Boolean).length) {
+        selector = candidate;
+        values = got;
+      }
+    }
+
+    if (values.filter(Boolean).length < Math.ceil(dataRows.length * 0.6)) continue;
+    if (dataRows.length > 2 && new Set(values.filter(Boolean)).size === 1) continue;
+
+    const universal = values.every(Boolean);
+    const nonEmpty = values.filter(Boolean);
+    const numeric =
+      nonEmpty.length > 0 &&
+      nonEmpty.every((t) => parseNumber(t) !== null) &&
+      nonEmpty.every((t) => ["currency", "numeric"].includes(kindOf(t)));
+
+    const name = headerName(named ? (headers[pos - 1] ?? "") : "", used, pos);
+    used.add(name);
+    fields[name] = numeric
+      ? { selector, type: "number", required: universal }
+      : { selector, type: "string", required: universal };
+  }
+
+  return Object.keys(fields).length >= 2 ? { rows: dataRows, fields, headerRows } : null;
+}
+
 export interface InferenceResult {
   spec: ScraperSpec;
   rowCount: number;
@@ -217,6 +361,9 @@ export function inferSpec(html: string, url: string, name: string): InferenceRes
 
     const valueCount = descendants(sample).filter(isValueElement).length;
     if (valueCount < 2) continue;
+
+    // Records do not live in a footer, a nav, or a reference list.
+    if (inChrome(sample)) continue;
 
     for (const selector of selectorsFor(doc, sample).slice(0, 6)) {
       let hits: ElementNode[];
@@ -250,6 +397,62 @@ export function inferSpec(html: string, url: string, name: string): InferenceRes
   }
 
   if (!best) return null;
+
+  // Tables first: they name their own fields in the header row and address
+  // cells by position, neither of which the generic column search can see.
+  const table = inferTable(best.rows);
+  if (table) {
+    // The chosen selector matches the header row too, so narrow it to the data
+    // rows or the header is extracted as a record.
+    // The data rows must be isolable, or the header is extracted as a record
+    // and every cell selector reports a violation. A <thead> means the data
+    // rows start at position 1 inside <tbody>; a header row sitting among the
+    // data rows means an nth-child offset. Try both, and verify by counting.
+    const base = best.selector;
+    const stripped = base.replace(/\s*>?\s*tr$/, "");
+    const offset = table.headerRows + 1;
+    let rowSelector = "";
+    for (const candidate of [
+      `${stripped} tbody tr`,
+      `${base}:nth-child(n+${offset})`,
+      `${stripped} tbody tr:nth-child(n+${offset})`,
+    ]) {
+      try {
+        if (querySelectorAll(doc, candidate).length === table.rows.length) {
+          rowSelector = candidate;
+          break;
+        }
+      } catch {
+        // an unparseable candidate is simply not used
+      }
+    }
+
+    // No selector isolates the data rows, so the table path would emit a spec
+    // that fails its own page. Fall through to the generic search instead.
+    if (rowSelector) {
+      const spec: ScraperSpec = {
+        name,
+        url,
+        row: rowSelector,
+        fields: table.fields,
+        expect: {
+          rows: {
+            min: Math.max(1, Math.floor(table.rows.length / 2)),
+            max: Math.ceil(table.rows.length * 2),
+          },
+        },
+      };
+      return {
+        spec,
+        rowCount: table.rows.length,
+        notes: [
+          `found a table with ${table.rows.length} data rows matching ${JSON.stringify(rowSelector)}`,
+          `named ${Object.keys(table.fields).length} column(s) from the header: ${Object.keys(table.fields).join(", ")}`,
+          "review the types and bounds before trusting it — a starting point, not an oracle",
+        ],
+      };
+    }
+  }
 
   const columns = columnsFor(best.rows)
     .filter((c) => c.texts.length > 0)
